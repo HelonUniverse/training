@@ -26,23 +26,25 @@ export default function HoyScreen() {
   const insets = useSafeAreaInsets();
   const toast = useToast();
   const { state, toggleSaved, isSaved } = useApp();
+  const isAdmin = state.user?.role === 'admin';
 
   const teaching = featuredTeaching;
-  const author = findGuide(teaching.authorId);
-  const saved = isSaved(teaching.id);
+  const author = teaching ? findGuide(teaching.authorId) : undefined;
+  const saved = teaching ? isSaved(teaching.id) : false;
   const nextEvent = useMemo(
     () => liveEvents.find((e) => e.status === 'live') ?? liveEvents[0],
     [liveEvents],
   );
-  const nextGuide = findGuide(nextEvent.guideId);
+  const nextGuide = nextEvent ? findGuide(nextEvent.guideId) : undefined;
   const moreTeachings = useMemo(
-    () => teachings.filter((t) => t.id !== teaching.id).slice(0, 5),
-    [teachings, teaching.id],
+    () => teachings.filter((t) => t.id !== teaching?.id).slice(0, 5),
+    [teachings, teaching?.id],
   );
 
   const firstName = (state.user?.name ?? 'Carla').split(' ')[0];
 
   const share = async () => {
+    if (!teaching) return;
     haptics.tap();
     try {
       await Share.share({
@@ -84,92 +86,131 @@ export default function HoyScreen() {
         </View>
 
         {/* Enseñanza del día */}
-        <View style={styles.block}>
-          <TeachingHero
-            teaching={teaching}
-            guideName={author?.name ?? 'Desde la Red'}
-            onPress={() => router.push(`/lectura/${teaching.id}`)}
-          />
-
-          <Text style={styles.excerpt}>{teaching.excerpt}</Text>
-
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => {
-              haptics.press();
-              router.push(`/lectura/${teaching.id}`);
-            }}
-            style={({ pressed }) => [styles.readRow, pressed && { opacity: 0.75 }]}
-          >
-            <Text style={styles.readLabel}>Leer la enseñanza completa</Text>
-            <View style={styles.readIcon}>
-              <Feather name="arrow-right" size={15} color={colors.glow} />
-            </View>
-          </Pressable>
-
-          <View style={styles.actions}>
-            <ActionButton
-              icon="headphones"
-              label="Escuchar"
-              onPress={() => toast({ text: `Audio de ${teaching.listenMinutes} min · demo`, icon: 'headphones' })}
+        {teaching ? (
+          <View style={styles.block}>
+            <TeachingHero
+              teaching={teaching}
+              guideName={author?.name ?? 'Desde la Red'}
+              onPress={() => router.push(`/lectura/${teaching.id}`)}
             />
-            <ActionButton
-              icon={saved ? 'check' : 'bookmark'}
-              label={saved ? 'Guardada' : 'Guardar'}
-              active={saved}
+
+            <Text style={styles.excerpt}>{teaching.excerpt}</Text>
+
+            <Pressable
+              accessibilityRole="button"
               onPress={() => {
-                toggleSaved(teaching.id);
-                toast({
-                  text: saved ? 'Quitada de tu biblioteca' : 'Guardada en tu biblioteca',
-                  icon: saved ? 'bookmark' : 'check',
-                });
+                haptics.press();
+                router.push(`/lectura/${teaching.id}`);
               }}
-            />
-            <ActionButton icon="share-2" label="Compartir" onPress={share} />
+              style={({ pressed }) => [styles.readRow, pressed && { opacity: 0.75 }]}
+            >
+              <Text style={styles.readLabel}>Leer la enseñanza completa</Text>
+              <View style={styles.readIcon}>
+                <Feather name="arrow-right" size={15} color={colors.glow} />
+              </View>
+            </Pressable>
+
+            <View style={styles.actions}>
+              <ActionButton
+                icon="headphones"
+                label="Escuchar"
+                onPress={() =>
+                  toast({ text: `Audio de ${teaching.listenMinutes} min · demo`, icon: 'headphones' })
+                }
+              />
+              <ActionButton
+                icon={saved ? 'check' : 'bookmark'}
+                label={saved ? 'Guardada' : 'Guardar'}
+                active={saved}
+                onPress={() => {
+                  toggleSaved(teaching.id);
+                  toast({
+                    text: saved ? 'Quitada de tu biblioteca' : 'Guardada en tu biblioteca',
+                    icon: saved ? 'bookmark' : 'check',
+                  });
+                }}
+              />
+              <ActionButton icon="share-2" label="Compartir" onPress={share} />
+            </View>
           </View>
-        </View>
+        ) : (
+          <View style={styles.block}>
+            <Card glow accent="glow" padding={24}>
+              <Text style={styles.practiceOverline}>La Red está en silencio</Text>
+              <Text style={styles.silenceTitle}>
+                Todavía no hay{'\n'}ninguna enseñanza
+              </Text>
+              <Text style={styles.practiceBody}>
+                {isAdmin
+                  ? 'La primera la escribes tú. En cuanto la publiques, esta pantalla se abre con ella.'
+                  : 'Vuelve pronto: la primera enseñanza está por llegar.'}
+              </Text>
+              {isAdmin ? (
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => {
+                    haptics.press();
+                    router.push('/admin/ensenanza/nueva');
+                  }}
+                  style={({ pressed }) => [styles.readRow, pressed && { opacity: 0.75 }]}
+                >
+                  <Text style={styles.readLabel}>Escribir la primera</Text>
+                  <View style={styles.readIcon}>
+                    <Feather name="arrow-right" size={15} color={colors.glow} />
+                  </View>
+                </Pressable>
+              ) : null}
+            </Card>
+          </View>
+        )}
 
         {/* Próximo evento en vivo */}
-        <View style={styles.block}>
-          <SectionHeader
-            overline="En vivo"
-            title="Próximo encuentro"
-            actionLabel="Ver todo"
-            onAction={() => router.push('/(tabs)/en-vivo')}
-          />
-          <View style={{ height: spacing.lg }} />
-          <LiveEventCard
-            event={nextEvent}
-            guideName={nextGuide?.name ?? ''}
-            variant="compact"
-            onPress={() => router.push('/(tabs)/en-vivo')}
-          />
-        </View>
+        {nextEvent ? (
+          <View style={styles.block}>
+            <SectionHeader
+              overline="En vivo"
+              title="Próximo encuentro"
+              actionLabel="Ver todo"
+              onAction={() => router.push('/(tabs)/en-vivo')}
+            />
+            <View style={{ height: spacing.lg }} />
+            <LiveEventCard
+              event={nextEvent}
+              guideName={nextGuide?.name ?? ''}
+              variant="compact"
+              onPress={() => router.push('/(tabs)/en-vivo')}
+            />
+          </View>
+        ) : null}
 
         {/* Explora hoy */}
-        <View style={styles.block}>
-          <SectionHeader
-            overline="Explora hoy"
-            title="Para seguir caminando"
-            actionLabel="Biblioteca"
-            onAction={() => router.push('/(tabs)/explorar')}
-          />
-        </View>
+        {moreTeachings.length > 0 ? (
+          <>
+            <View style={styles.block}>
+              <SectionHeader
+                overline="Explora hoy"
+                title="Para seguir caminando"
+                actionLabel="Biblioteca"
+                onAction={() => router.push('/(tabs)/explorar')}
+              />
+            </View>
 
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.carousel}
-        >
-          {moreTeachings.map((t) => (
-            <TeachingCard
-              key={t.id}
-              teaching={t}
-              saved={isSaved(t.id)}
-              onPress={() => router.push(`/lectura/${t.id}`)}
-            />
-          ))}
-        </ScrollView>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.carousel}
+            >
+              {moreTeachings.map((t) => (
+                <TeachingCard
+                  key={t.id}
+                  teaching={t}
+                  saved={isSaved(t.id)}
+                  onPress={() => router.push(`/lectura/${t.id}`)}
+                />
+              ))}
+            </ScrollView>
+          </>
+        ) : null}
 
         {/* Accesos rápidos */}
         <View style={styles.block}>
@@ -177,13 +218,13 @@ export default function HoyScreen() {
             <QuickTile
               icon="users"
               title="Círculos"
-              caption={`${circles.length} activos`}
+              caption={circles.length > 0 ? `${circles.length} activos` : 'Ninguno todavía'}
               onPress={() => router.push('/circulos')}
             />
             <QuickTile
               icon="compass"
               title="Guías"
-              caption={`${guides.length} en la Red`}
+              caption={guides.length > 0 ? `${guides.length} en la Red` : 'Ninguna todavía'}
               onPress={() => router.push('/guias')}
             />
           </View>
@@ -338,6 +379,14 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
     textTransform: 'uppercase',
     color: colors.glow,
+  },
+  silenceTitle: {
+    fontFamily: fonts.displayLight,
+    fontSize: 27,
+    lineHeight: 34,
+    color: colors.text,
+    marginTop: 8,
+    marginBottom: 10,
   },
   practiceTitle: {
     fontFamily: fonts.display,

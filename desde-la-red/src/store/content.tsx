@@ -23,7 +23,8 @@ interface ContentValue extends RemoteContent {
   source: 'local' | 'remote';
   loading: boolean;
   error: string | null;
-  featuredTeaching: Teaching;
+  /** La enseñanza que abre la app. `null` mientras no haya ninguna. */
+  featuredTeaching: Teaching | null;
   teachingThemes: string[];
   findGuide: (id?: string) => Guide | undefined;
   findService: (id?: string) => Service | undefined;
@@ -46,9 +47,10 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     setLoading(true);
     try {
       const remote = await fetchContent();
-      // Si la base está vacía todavía, seguimos mostrando el contenido local
-      // en vez de dejar la app en blanco.
-      if (remote && remote.teachings.length > 0) {
+      // Una Red recién abierta está vacía de verdad, y eso es un estado
+      // legítimo: si volviéramos al contenido local, reaparecería el de
+      // muestra que ya se retiró. En cuanto la base responde, manda ella.
+      if (remote) {
         setContent(remote);
         setSource('remote');
       }
@@ -71,7 +73,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
       source,
       loading,
       error,
-      featuredTeaching: teachings.find((t) => t.featured) ?? teachings[0] ?? LOCAL.teachings[0],
+      featuredTeaching: teachings.find((t) => t.featured) ?? teachings[0] ?? null,
       teachingThemes: Array.from(new Set(teachings.map((t) => t.theme))),
       findGuide: (id) => guides.find((g) => g.id === id),
       findService: (id) => services.find((s) => s.id === id),
