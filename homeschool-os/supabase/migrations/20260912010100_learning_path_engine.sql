@@ -15,8 +15,15 @@
 --   diagnostic_frontier           the last session ended around here
 --   uncertain_boundary            there is evidence and it does not settle it
 --   continue_connected_skill      it follows from something characterized
---   curriculum_resource_available the family already has material for it
 --   enrichment                    application of something a person confirmed
+--
+-- WHAT IS NOT A SOURCE: owning a worksheet. A resource existing in the database
+-- must never by itself put a skill in a child's path - that is a content
+-- catalogue deciding what she learns next, which is precisely backwards. The
+-- order is: choose a reasonable skill, work out the readiness context, and THEN
+-- attach material if any exists. `curriculum_resource_available` survives as a
+-- node reason for a resource-led choice a PERSON makes; the engine never emits
+-- it.
 --
 -- Age, grade, benchmarks and what other children are doing are absent, and 0101
 -- refuses these functions if their source so much as mentions them.
@@ -187,10 +194,21 @@ $fn$;
 -- or not anybody has material for it; the alternative is inventing content,
 -- which is how a learning model quietly becomes a content catalogue.
 --
--- Enrolled courses first, because material this family already has beats
--- material they do not; then a mapping a person confirmed over one nobody has
--- looked at; then the resource kind in its declared order; then title and id, so
--- two runs never disagree.
+-- ONLY CONFIRMED MAPPINGS. A mapping nobody has checked is a guess about what a
+-- worksheet teaches, and attaching one automatically would put unreviewed
+-- machine judgement into a child's plan through the back door - the same thing
+-- Phase 3 refuses for evidence and Phase 5 refuses for routing. Unconfirmed
+-- mappings stay visible for somebody to review; they do not drive anything.
+--
+-- This is also why the demo resources seeded in 0101 never attach: their
+-- mappings are `confirmed = false`, because nobody confirmed them. A seed that
+-- auto-attached would be Nestra quietly recommending its own test content.
+--
+-- Order: material this family is actually enrolled in first, then the resource
+-- kind in its declared order, then title and id so two runs never disagree.
+-- A parent modality preference would belong between the first and second keys;
+-- the data model does not represent one today, so that criterion is skipped
+-- rather than invented.
 
 create or replace function app.path_resource_for(p_student uuid, p_skill uuid)
 returns uuid language sql stable security invoker set search_path = '' as $fn$
@@ -199,16 +217,22 @@ returns uuid language sql stable security invoker set search_path = '' as $fn$
     join public.learning_resources r on r.id = rs.resource_id
     left join public.courses c on c.id = r.course_id
    where rs.skill_id = p_skill
+     and rs.confirmed
    order by
      case when exists (select 1 from public.student_course_enrollments e
                         where e.student_id = p_student and e.course_id = c.id)
           then 0 else 1 end,
-     case when rs.confirmed then 0 else 1 end,
      r.kind,
      r.title,
      r.id
    limit 1;
 $fn$;
+
+comment on function app.path_resource_for(uuid, uuid) is
+  'The resource to attach to a node, or nothing. Only mappings a person has '
+  'confirmed are eligible: an unreviewed guess about what a worksheet teaches '
+  'may not quietly enter a child''s plan. "No resource available" is a valid '
+  'and honest answer.';
 
 -- =============================================================================
 -- Candidates
@@ -280,14 +304,6 @@ language sql stable security invoker set search_path = '' as $fn$
                        where sp.skill_id = b.skill_id)
 
     union all
-    -- the family already has material for it
-    select b.skill_id, 'curriculum_resource_available'::app.path_node_reason,
-           'no_evidence_yet'::app.path_readiness_reason
-      from branch b
-     where not app.path_well_characterized(p_student, b.skill_id)
-       and app.path_resource_for(p_student, b.skill_id) is not null
-
-    union all
     -- something a person confirmed, with real material to apply it. Offered only
     -- when such material exists: a category is never filled by inventing work.
     select b.skill_id, 'enrichment'::app.path_node_reason,
@@ -306,9 +322,8 @@ language sql stable security invoker set search_path = '' as $fn$
              when 'diagnostic_frontier'           then 4
              when 'uncertain_boundary'            then 5
              when 'continue_connected_skill'      then 6
-             when 'curriculum_resource_available' then 7
-             when 'enrichment'                    then 8
-             else 9 end as reason_rank,
+             when 'enrichment'                    then 7
+             else 8 end as reason_rank,
            s.rr
       from sourced s
   )

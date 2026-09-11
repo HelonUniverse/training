@@ -81,7 +81,10 @@ declare
   v_reasons text[] := '{}';
   v_supports uuid[] := '{}';          -- the skill each entry exists to support
   v_taken uuid[] := '{}';
-  v_sup uuid; v_unmet uuid[]; v_person_named boolean; r record; i int; v_id uuid; v_ready jsonb; v_res uuid;
+  v_sup uuid; v_unmet uuid[]; v_n_unmet int; v_person_named boolean;
+  v_goal_skills uuid[] := '{}'; v_goal_reasons text[] := '{}';
+  v_goal_unmet jsonb := '[]'::jsonb; v_actionable int := 0;
+  r record; i int; v_id uuid; v_ready jsonb; v_res uuid;
   v_ids uuid[] := '{}';
   v_inputs jsonb;
 begin
@@ -108,9 +111,14 @@ begin
     end if;
     v_version := v_old.version + 1;
 
+    -- Removed, and not put back. A parent who took a skill off and then changed
+    -- her mind has made two decisions, and the second one is the current one.
     select coalesce(array_agg(distinct n.skill_id), '{}') into v_removed
       from public.learning_path_nodes n
-     where n.path_id = p_supersedes and n.status = 'removed';
+     where n.path_id = p_supersedes and n.status = 'removed'
+       and not exists (select 1 from public.learning_path_nodes n2
+                        where n2.path_id = n.path_id and n2.skill_id = n.skill_id
+                          and n2.status <> 'removed');
 
     -- Skills she put there herself keep their place at the front.
     for r in select n.skill_id, n.position from public.learning_path_nodes n
@@ -142,42 +150,78 @@ begin
     -- a staircase, and a staircase is what this rule exists to prevent - so the
     -- candidate is skipped and a later path, with more known, can reach it.
     v_unmet := app.path_unmet_prerequisites(p_student, p_root, r.skill_id, v_taken);
+    v_n_unmet := coalesce(array_length(v_unmet, 1), 0);
 
-    -- REACHABILITY, and who it applies to. The rule exists to stop NESTRA
-    -- jumping: the first smoke test produced a path opening at "compare
-    -- fractions" for a child with no fraction evidence, purely because that
-    -- skill had a demo worksheet attached. So a skill Nestra chose is skipped
-    -- when its prerequisites are not something we can speak to.
+    -- READINESS APPLIES TO EVERYONE, INCLUDING HER.
     --
-    -- It does NOT apply to a skill a person named. A parent who says "this term
-    -- we are working on comparing fractions" is not making a claim about
-    -- readiness that Nestra gets to veto; she is telling us what this family is
-    -- doing. The path says yes, proposes what support it can, and records in the
-    -- readiness reasons that the ground underneath is not characterized. Found
-    -- by the test that asks whether a parent's goal survives the engine.
+    --   0 unmet direct prerequisites  -> actionable
+    --   1                             -> actionable, behind ONE support node
+    --   2 or more                     -> not actionable
+    --
+    -- And a skill a person NAMED is never discarded for failing that test. It
+    -- becomes a GOAL TARGET: kept on the path, named, visible, and explicitly
+    -- not presented as the next thing to do.
+    --
+    -- This is the correction that matters most in the whole engine. An earlier
+    -- version let a parent's goal bypass readiness entirely, on the reasoning
+    -- that she is the authority - which is true, and led to Nestra proposing
+    -- "compare fractions" as the next step for a child with no evidence under
+    -- it. Her authority is over what the family is working toward. It was never
+    -- a claim that her daughter is ready this week, and turning it into one puts
+    -- words in her mouth.
+    --
+    -- She can still place it first herself. That path goes through
+    -- add_path_node / reorder_path_node, which allow it and hand back the
+    -- structured prerequisite warning.
     v_person_named := r.reason_code in ('parent_goal','revisit_requested','active_plan_priority');
 
-    if not v_person_named and coalesce(array_length(v_unmet, 1), 0) >= 2 then
+    if v_n_unmet >= 2 then
+      if v_person_named then
+        v_goal_skills  := v_goal_skills || r.skill_id;
+        v_goal_reasons := v_goal_reasons || (r.reason_code::text);
+        v_goal_unmet   := v_goal_unmet || jsonb_build_object(
+          'skill_id', r.skill_id, 'unmet_prerequisites', to_jsonb(v_unmet));
+        v_taken := v_taken || r.skill_id;
+      end if;
       continue;
     end if;
 
-    if coalesce(array_length(v_unmet, 1), 0) >= 1 then
+    if v_n_unmet = 1 then
       v_sup := v_unmet[1];              -- nearest by stable skill code. One. Never two.
-      if v_sup <> all(v_removed)
-         and coalesce(array_length(v_skills, 1), 0) + 2 <= p_horizon then
-        v_skills := v_skills || v_sup;
-        v_reasons := v_reasons || 'prerequisite_support'::text;
-        v_supports := v_supports || r.skill_id;
-        v_taken := v_taken || v_sup;
-      elsif not v_person_named then
-        continue;                       -- no room to support it; do not strand it
+      if v_sup = any(v_removed)
+         or coalesce(array_length(v_skills, 1), 0) + 2 > p_horizon then
+        -- No room to carry it, so it is not actionable here either. A named
+        -- skill is still kept rather than dropped.
+        if v_person_named then
+          v_goal_skills  := v_goal_skills || r.skill_id;
+          v_goal_reasons := v_goal_reasons || (r.reason_code::text);
+          v_goal_unmet   := v_goal_unmet || jsonb_build_object(
+            'skill_id', r.skill_id, 'unmet_prerequisites', to_jsonb(v_unmet));
+          v_taken := v_taken || r.skill_id;
+        end if;
+        continue;
       end if;
+      v_skills := v_skills || v_sup;
+      v_reasons := v_reasons || 'prerequisite_support'::text;
+      v_supports := v_supports || r.skill_id;
+      v_taken := v_taken || v_sup;
     end if;
 
     v_skills := v_skills || r.skill_id;
     v_reasons := v_reasons || (r.reason_code::text);
     v_supports := v_supports || null::uuid;
     v_taken := v_taken || r.skill_id;
+  end loop;
+
+  -- Goal targets sit after the actionable steps and do NOT consume the horizon.
+  -- The horizon bounds what a family is being asked to do next; where they are
+  -- heading is not a task, and capping it would be Nestra deciding how many
+  -- things a mother is allowed to want.
+  v_actionable := coalesce(array_length(v_skills, 1), 0);
+  for i in 1..coalesce(array_length(v_goal_skills, 1), 0) loop
+    v_skills   := v_skills   || v_goal_skills[i];
+    v_reasons  := v_reasons  || v_goal_reasons[i];
+    v_supports := v_supports || null::uuid;
   end loop;
 
   v_inputs := jsonb_build_object(
@@ -215,10 +259,18 @@ begin
     insert into public.learning_path_nodes (
         path_id, student_id, skill_id, position, reason_code, reason_detail,
         readiness_reasons, prerequisites_considered, evidence_context,
-        resource_id, resource_note, status, added_by_human, added_by)
+        resource_id, resource_note, status, node_kind, added_by_human, added_by)
     values (v_path, p_student, v_skills[i], i, v_reasons[i]::app.path_node_reason,
             jsonb_build_object('reason', v_reasons[i],
                                'supports_skill_id', v_supports[i],
+                               'node_kind', case when i > v_actionable
+                                                 then 'goal_target' else 'actionable' end,
+                               'not_actionable_yet', i > v_actionable,
+                               'unmet_prerequisites',
+                                 coalesce((select g->'unmet_prerequisites'
+                                             from jsonb_array_elements(v_goal_unmet) g
+                                            where (g->>'skill_id')::uuid = v_skills[i]),
+                                          '[]'::jsonb),
                                'rule_version', app.learning_path_rule_version()),
             (select coalesce(array_agg(x::app.path_readiness_reason), '{}')
                from jsonb_array_elements_text(v_ready->'readiness_reasons') t(x)),
@@ -228,6 +280,7 @@ begin
             v_res,
             case when v_res is null then 'no resource is attached to this skill yet' end,
             'proposed',
+            (case when i > v_actionable then 'goal_target' else 'actionable' end)::app.path_node_kind,
             v_reasons[i] = 'human_added',
             case when v_reasons[i] = 'human_added' then auth.uid() end)
     returning id into v_id;
@@ -554,6 +607,9 @@ begin
     'regeneration_reason', v.regeneration_reason,
     'approved_by', v.approved_by, 'approved_at', v.approved_at,
     'generation_inputs', v.generation_inputs,
+    -- Deliberately two arrays. "Where we are heading" and "what to do next" are
+    -- different answers, and a caller that has to filter a flag to tell them
+    -- apart is a caller that will one day forget to.
     'nodes', (select coalesce(jsonb_agg(jsonb_build_object(
                 'position', n.position, 'skill_id', n.skill_id, 'skill', k.code,
                 'skill_name', k.name,
@@ -564,10 +620,23 @@ begin
                 'resource_id', n.resource_id, 'resource_note', n.resource_note,
                 'supports_node_id', n.supports_node_id,
                 'status', n.status, 'added_by_human', n.added_by_human,
+                'node_kind', n.node_kind,
                 'node', n.id) order by n.position), '[]'::jsonb)
                 from public.learning_path_nodes n
                 join public.skills k on k.id = n.skill_id
-               where n.path_id = p_path and n.status <> 'removed'),
+               where n.path_id = p_path and n.status <> 'removed'
+                 and n.node_kind = 'actionable'),
+    'goal_targets', (select coalesce(jsonb_agg(jsonb_build_object(
+                'position', n.position, 'skill_id', n.skill_id, 'skill', k.code,
+                'skill_name', k.name, 'reason', n.reason_code,
+                'reason_detail', n.reason_detail,
+                'readiness_reasons', to_jsonb(n.readiness_reasons),
+                'evidence_context', n.evidence_context,
+                'status', n.status, 'node', n.id) order by n.position), '[]'::jsonb)
+                from public.learning_path_nodes n
+                join public.skills k on k.id = n.skill_id
+               where n.path_id = p_path and n.status <> 'removed'
+                 and n.node_kind = 'goal_target'),
     'removed', (select coalesce(jsonb_agg(jsonb_build_object(
                 'skill', k.code, 'node', n.id) order by n.position), '[]'::jsonb)
                 from public.learning_path_nodes n

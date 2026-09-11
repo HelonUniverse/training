@@ -74,7 +74,9 @@ begin
            case when (n->>'resource_id') is not null then '+res' else '' end),
            ' | ' order by (n->>'position')::int)
     into v from jsonb_array_elements(j->'nodes') n;
-  return coalesce(v, '(no nodes)');
+  return coalesce(v, '(no nodes)')
+         || coalesce((select '  >> goal: ' || string_agg(g->>'skill' || '/' || (g->>'reason'), ', ')
+                        from jsonb_array_elements(j->'goal_targets') g), '');
 end $$;
 
 grant execute on function t.p6_state(uuid, text, text, text, uuid) to authenticated;
@@ -92,11 +94,12 @@ begin
   perform t.logout();
   v := t.p6_path('44444444-4444-4444-8444-00000000000d','NST.FR.1',
                  '11111111-1111-4111-8111-000000000001');
-  perform t.assert_eq(v,
-    '1.NST.FR.1/continue_connected_skill | 2.NST.FR.2/prerequisite_support | 3.NST.FR.3/curriculum_resource_available+res',
+  perform t.assert_eq(v, '1.NST.FR.1/continue_connected_skill',
     '1a. a child Nestra knows nothing about gets a path that starts at the beginning of the branch');
   perform t.assert(v not like '%NST.FR.5%',
     '1b. and does not jump to the far end of the graph because a worksheet happens to exist there');
+  perform t.assert(v not like '%+res%',
+    '1c. and nothing auto-attached, because no mapping has been confirmed by a person');
 end $$;
 rollback;
 
@@ -147,8 +150,13 @@ do $$
 declare v text;
 begin
   perform t.logout();
-  -- FR.3 is the one with a demo resource attached, so confirming it is what
-  -- makes application work available rather than imagined.
+  -- Enrichment needs real material, and real material means a mapping a person
+  -- confirmed. The demo seed is deliberately unconfirmed, so a human confirms
+  -- this one first - which is exactly the workflow the rule describes.
+  update public.resource_skills rs
+     set confirmed = true, confirmed_by = '11111111-1111-4111-8111-000000000001',
+         confirmed_at = now()
+   where rs.skill_id = (select id from public.skills where code='NST.FR.3');
   perform t.p6_evidence('44444444-4444-4444-8444-00000000000d','NST.FR.3','developing',
                         '11111111-1111-4111-8111-000000000001');
   perform t.login('11111111-1111-4111-8111-000000000001');
@@ -236,7 +244,8 @@ begin
                      '11111111-1111-4111-8111-000000000001');
   perform t.p6_state('44444444-4444-4444-8444-00000000000d','NST.FR.2','developing','supported',
                      '11111111-1111-4111-8111-000000000001');
-  -- Carla says: this term we care about comparing fractions.
+  -- Carla says: this term we care about comparing fractions. Two skills she has
+  -- no evidence for sit under it.
   insert into public.learning_goals (student_id, skill_id, title, horizon, priority,
            status, source_type, approved_by, created_by)
   values ('44444444-4444-4444-8444-00000000000d',
@@ -245,14 +254,12 @@ begin
           '11111111-1111-4111-8111-000000000001','11111111-1111-4111-8111-000000000001');
   v := t.p6_path('44444444-4444-4444-8444-00000000000d','NST.FR.1',
                  '11111111-1111-4111-8111-000000000001', 5);
-  perform t.assert(v like '%NST.FR.5/parent_goal%',
-    '7a. a skill a parent set as a goal is on the path, and says so');
-  perform t.assert(v like '%NST.FR.3/prerequisite_support%',
-    '7b. with one support node underneath it - the nearest unmet prerequisite by skill code');
-  perform t.assert_eq(
-    (select count(*)::int from public.learning_path_nodes n
-      where n.reason_code = 'prerequisite_support'), 1,
-    '7c. exactly one. A goal two steps away does not become a five-step staircase');
+  perform t.assert(v like '%>> goal: NST.FR.5/parent_goal%',
+    '7a. her goal is kept, named, and visible - it is where the family is heading');
+  perform t.assert(v not like '1.NST.FR.5%',
+    '7b. and is NOT presented as the next thing to do, because nothing says the child is ready');
+  perform t.assert(v like '1.NST.FR.3/%',
+    '7c. the actionable path begins where the evidence currently supports');
 end $$;
 rollback;
 
@@ -569,6 +576,13 @@ do $$
 declare j jsonb; v_path uuid; v_node uuid; v_fr5 uuid; v_warn jsonb;
 begin
   perform t.logout();
+  -- Enough characterized that the path has more than one step to move around.
+  perform t.p6_state('44444444-4444-4444-8444-00000000000d','NST.FR.1','developing','supported',
+                     '11111111-1111-4111-8111-000000000001');
+  perform t.p6_state('44444444-4444-4444-8444-00000000000d','NST.FR.2','developing','supported',
+                     '11111111-1111-4111-8111-000000000001');
+  perform t.p6_state('44444444-4444-4444-8444-00000000000d','NST.FR.3','developing','supported',
+                     '11111111-1111-4111-8111-000000000001');
   perform t.login('11111111-1111-4111-8111-000000000001');
   j := public.generate_learning_path('44444444-4444-4444-8444-00000000000d',
         (select id from public.skills where code='NST.FR.1'), 4, 'P6');
@@ -603,8 +617,11 @@ begin
       where n.path_id = v_path and n.skill_id = v_fr5),
     '24b. and the record names her rather than crediting Nestra');
 
+  -- She puts comparing fractions at the front, ahead of what it builds on.
+  j := public.add_path_node(v_path, (select id from public.skills where code='NST.FR.5'),
+                            null, 'P6 I want this one too');
   select n.id into v_node from public.learning_path_nodes n
-   where n.path_id = v_path and n.status <> 'removed' order by n.position desc limit 1;
+   where n.path_id = v_path and n.skill_id = (select id from public.skills where code='NST.FR.5');
   j := public.reorder_path_node(v_node, 1, 'P6 do this first');
   perform t.assert_eq((j->>'to')::int, 1, '25a. a parent can move a skill to the front');
   v_warn := j->'warnings';
@@ -902,7 +919,7 @@ begin
   perform t.logout();
   v := t.p6_path('44444444-4444-4444-8444-00000000000d','NST.FR.1',
                  '11111111-1111-4111-8111-000000000001');
-  perform t.assert(v like '%NST.FR.1/continue_connected_skill |%',
+  perform t.assert(v like '%NST.FR.1/continue_connected_skill%',
     '37a. a skill with nothing attached to it is still on the path');
   perform t.assert_eq(
     (select n.resource_note from public.learning_path_nodes n
@@ -914,15 +931,21 @@ rollback;
 
 begin;
 do $$
-declare a uuid; b uuid;
+declare a uuid; b uuid; v_sk uuid;
 begin
   perform t.logout();
-  a := app.path_resource_for('44444444-4444-4444-8444-00000000000d',
-        (select id from public.skills where code='NST.FR.3'));
-  b := app.path_resource_for('44444444-4444-4444-8444-00000000000d',
-        (select id from public.skills where code='NST.FR.3'));
-  perform t.assert(a is not null, '38a. a skill with material gets material');
-  perform t.assert_eq(a, b, '38b. and the same one every time it is asked');
+  select id into v_sk from public.skills where code='NST.FR.3';
+  perform t.assert(app.path_resource_for('44444444-4444-4444-8444-00000000000d', v_sk) is null,
+    '38a. an unconfirmed mapping attaches nothing, however good the resource looks');
+  update public.resource_skills rs
+     set confirmed = true, confirmed_by = '11111111-1111-4111-8111-000000000001',
+         confirmed_at = now()
+   where rs.skill_id = v_sk;
+  a := app.path_resource_for('44444444-4444-4444-8444-00000000000d', v_sk);
+  b := app.path_resource_for('44444444-4444-4444-8444-00000000000d', v_sk);
+  perform t.assert(a is not null,
+    '38b. once a person confirms the mapping, the resource is eligible');
+  perform t.assert_eq(a, b, '38c. and the same one is chosen every time it is asked');
 end $$;
 rollback;
 
@@ -1069,5 +1092,314 @@ begin
     perform t.assert(sqlerrm like '%are not editable%',
       'G7. why a skill was proposed, and what was known then, cannot be edited afterwards');
   end;
+end $$;
+rollback;
+
+-- =============================================================================
+-- A-J. The approved refinements
+-- =============================================================================
+-- The distinction these tests exist to protect: WHERE A FAMILY IS HEADING is not
+-- the same statement as WHAT TO DO NEXT. A product that collapses them either
+-- drops a mother's goal because the prerequisites are not there, or tells her a
+-- child is ready for something nothing in the evidence supports. Both are ways
+-- of putting words in her mouth.
+
+-- A. A goal with nothing missing underneath it is simply the next thing.
+begin;
+do $$
+declare v text;
+begin
+  perform t.logout();
+  perform t.p6_state('44444444-4444-4444-8444-00000000000d','NST.FR.1','developing','supported',
+                     '11111111-1111-4111-8111-000000000001');
+  perform t.p6_state('44444444-4444-4444-8444-00000000000d','NST.FR.2','developing','supported',
+                     '11111111-1111-4111-8111-000000000001');
+  insert into public.learning_goals (student_id, skill_id, title, horizon, priority,
+           status, source_type, approved_by, created_by)
+  values ('44444444-4444-4444-8444-00000000000d',
+          (select id from public.skills where code='NST.FR.3'),
+          'P6 equivalent fractions', 'short_term', 1, 'active', 'parent',
+          '11111111-1111-4111-8111-000000000001','11111111-1111-4111-8111-000000000001');
+  v := t.p6_path('44444444-4444-4444-8444-00000000000d','NST.FR.1',
+                 '11111111-1111-4111-8111-000000000001', 4);
+  perform t.assert(v like '1.NST.FR.3/parent_goal%',
+    'A1. a goal whose prerequisites are characterized is the actionable first step');
+  perform t.assert(v not like '%>> goal:%',
+    'A2. and is not held back as a distant target');
+end $$;
+rollback;
+
+-- B. One thing missing underneath: one support node, then the goal.
+begin;
+do $$
+declare v text;
+begin
+  perform t.logout();
+  perform t.p6_state('44444444-4444-4444-8444-00000000000d','NST.FR.1','developing','supported',
+                     '11111111-1111-4111-8111-000000000001');
+  insert into public.learning_goals (student_id, skill_id, title, horizon, priority,
+           status, source_type, approved_by, created_by)
+  values ('44444444-4444-4444-8444-00000000000d',
+          (select id from public.skills where code='NST.FR.3'),
+          'P6 equivalent fractions', 'short_term', 1, 'active', 'parent',
+          '11111111-1111-4111-8111-000000000001','11111111-1111-4111-8111-000000000001');
+  v := t.p6_path('44444444-4444-4444-8444-00000000000d','NST.FR.1',
+                 '11111111-1111-4111-8111-000000000001', 4);
+  perform t.assert_eq(v,
+    '1.NST.FR.2/prerequisite_support | 2.NST.FR.3/parent_goal',
+    'B1. one unmet prerequisite is carried by exactly one support node, then the goal');
+  perform t.assert(v not like '%>> goal:%',
+    'B2. and with that support the goal is genuinely actionable');
+end $$;
+rollback;
+
+-- C. Two things missing underneath: the goal is kept, and is not called ready.
+begin;
+do $$
+declare v text; v_detail jsonb;
+begin
+  perform t.logout();
+  perform t.p6_state('44444444-4444-4444-8444-00000000000d','NST.FR.1','developing','supported',
+                     '11111111-1111-4111-8111-000000000001');
+  perform t.p6_state('44444444-4444-4444-8444-00000000000d','NST.FR.2','developing','supported',
+                     '11111111-1111-4111-8111-000000000001');
+  insert into public.learning_goals (student_id, skill_id, title, horizon, priority,
+           status, source_type, approved_by, created_by)
+  values ('44444444-4444-4444-8444-00000000000d',
+          (select id from public.skills where code='NST.FR.5'),
+          'P6 compare fractions', 'short_term', 1, 'active', 'parent',
+          '11111111-1111-4111-8111-000000000001','11111111-1111-4111-8111-000000000001');
+  v := t.p6_path('44444444-4444-4444-8444-00000000000d','NST.FR.1',
+                 '11111111-1111-4111-8111-000000000001', 5);
+  perform t.assert(v like '%>> goal: NST.FR.5/parent_goal%',
+    'C1. a goal two steps out is kept, named, and visible');
+  perform t.assert(v not like '1.NST.FR.5%' and v not like '%| 2.NST.FR.5%',
+    'C2. and is never the actionable next step');
+  perform t.assert(v like '1.NST.FR.3/%',
+    'C3. while the path starts where the evidence actually supports');
+
+  select n.reason_detail into v_detail from public.learning_path_nodes n
+    join public.skills k on k.id = n.skill_id where k.code = 'NST.FR.5';
+  perform t.assert_eq(v_detail->>'not_actionable_yet', 'true',
+    'C4. the node says so structurally, not in a sentence somebody has to read');
+  perform t.assert_eq(jsonb_array_length(v_detail->'unmet_prerequisites'), 2,
+    'C5. and names what is missing underneath rather than leaving her to guess');
+  perform t.assert_eq(
+    (select n.node_kind::text from public.learning_path_nodes n
+      join public.skills k on k.id = n.skill_id where k.code = 'NST.FR.5'),
+    'goal_target', 'C6. it is a goal target, which is a different thing from a next step');
+end $$;
+rollback;
+
+-- D. She puts it first anyway. Allowed, with the warning.
+begin;
+do $$
+declare j jsonb; v_path uuid; v_node uuid; v_warn jsonb;
+begin
+  perform t.logout();
+  perform t.p6_state('44444444-4444-4444-8444-00000000000d','NST.FR.1','developing','supported',
+                     '11111111-1111-4111-8111-000000000001');
+  perform t.p6_state('44444444-4444-4444-8444-00000000000d','NST.FR.2','developing','supported',
+                     '11111111-1111-4111-8111-000000000001');
+  perform t.login('11111111-1111-4111-8111-000000000001');
+  j := public.generate_learning_path('44444444-4444-4444-8444-00000000000d',
+        (select id from public.skills where code='NST.FR.1'), 4, 'P6');
+  v_path := (j->>'path')::uuid;
+  j := public.add_path_node(v_path, (select id from public.skills where code='NST.FR.5'),
+                            1, 'P6 we are doing this now');
+  v_warn := j->'warnings';
+  perform t.assert(v_warn::text like '%prerequisite_usually_comes_first%',
+    'D1. she is told what it usually builds on');
+  perform t.assert_eq(
+    (select n.position from public.learning_path_nodes n
+      where n.path_id = v_path
+        and n.skill_id = (select id from public.skills where code='NST.FR.5')), 1,
+    'D2. and it goes where she put it. She is the one who knows her child');
+  perform t.assert_eq(
+    (select n.node_kind::text from public.learning_path_nodes n
+      where n.path_id = v_path
+        and n.skill_id = (select id from public.skills where code='NST.FR.5')),
+    'actionable', 'D3. a skill she placed herself is a step, not a distant target');
+  perform t.assert_eq(
+    (select count(*)::int from public.learning_path_events e
+      where e.path_id = v_path and e.kind = 'node_added'
+        and e.warnings::text like '%prerequisite_usually_comes_first%'), 1,
+    'D4. and the warning she was shown stays on the record');
+  perform t.logout();
+end $$;
+rollback;
+
+-- E. Owning a worksheet is not a reason to learn something.
+begin;
+do $$
+declare v text; v_sk uuid;
+begin
+  perform t.logout();
+  select id into v_sk from public.skills where code = 'NST.FR.5';
+  -- A confirmed, enrolled, perfectly good resource, on a skill four steps away.
+  update public.resource_skills rs
+     set confirmed = true, confirmed_by = '11111111-1111-4111-8111-000000000001',
+         confirmed_at = now()
+   where rs.skill_id = v_sk;
+  v := t.p6_path('44444444-4444-4444-8444-00000000000d','NST.FR.1',
+                 '11111111-1111-4111-8111-000000000001', 5);
+  perform t.assert(v not like '%NST.FR.5%',
+    'E1. a resource existing does not put its skill in a child''s path');
+  perform t.assert_eq(
+    (select count(*)::int from public.learning_path_nodes n
+      where n.reason_code = 'curriculum_resource_available'), 0,
+    'E2. the engine never chooses a skill because material happens to exist for it');
+end $$;
+rollback;
+
+-- F-G. Attachment follows selection, and only a confirmed mapping attaches.
+begin;
+do $$
+declare v text; v_sk uuid;
+begin
+  perform t.logout();
+  select id into v_sk from public.skills where code = 'NST.FR.1';
+  insert into public.learning_resources (id, course_id, kind, title, is_demo)
+  values ('dddddddd-0000-4000-8000-00000000000f','dddddddd-0000-4000-8000-0000000000ff',
+          'practice','Demo: halves and quarters', true);
+  insert into public.resource_skills (resource_id, skill_id, source_type, confirmed)
+  values ('dddddddd-0000-4000-8000-00000000000f', v_sk, 'manual', false);
+
+  v := t.p6_path('44444444-4444-4444-8444-00000000000d','NST.FR.1',
+                 '11111111-1111-4111-8111-000000000001');
+  perform t.assert(v like '%NST.FR.1/continue_connected_skill' ,
+    'F1. the skill is chosen on its own merits');
+  perform t.assert(v not like '%+res%',
+    'F2. and an unconfirmed mapping attaches nothing to it');
+
+  update public.resource_skills rs
+     set confirmed = true, confirmed_by = '11111111-1111-4111-8111-000000000001',
+         confirmed_at = now()
+   where rs.resource_id = 'dddddddd-0000-4000-8000-00000000000f';
+  v := t.p6_path('44444444-4444-4444-8444-00000000000d','NST.FR.1',
+                 '11111111-1111-4111-8111-000000000001');
+  perform t.assert(v like '%NST.FR.1/continue_connected_skill+res',
+    'G1. once a person confirms the mapping, the same node carries the resource');
+end $$;
+rollback;
+
+-- G2. Material the family is enrolled in wins over material they are not.
+begin;
+do $$
+declare v_sk uuid; v_course uuid; v_chosen uuid;
+begin
+  perform t.logout();
+  select id into v_sk from public.skills where code = 'NST.FR.1';
+  select id into v_course from public.courses where name = 'Teaching Textbooks Math 4';
+
+  -- Two confirmed resources on the demo course, which nobody is enrolled in.
+  insert into public.learning_resources (id, course_id, kind, title, is_demo)
+  values ('dddddddd-0000-4000-8000-0000000000a1','dddddddd-0000-4000-8000-0000000000ff',
+          'practice','A catalogue worksheet', false),
+         ('dddddddd-0000-4000-8000-0000000000a2','dddddddd-0000-4000-8000-0000000000ff',
+          'practice','Z another catalogue worksheet', false);
+  insert into public.resource_skills (resource_id, skill_id, source_type, confirmed,
+           confirmed_by, confirmed_at)
+  values ('dddddddd-0000-4000-8000-0000000000a1', v_sk, 'manual', true,
+          '11111111-1111-4111-8111-000000000001', now()),
+         ('dddddddd-0000-4000-8000-0000000000a2', v_sk, 'manual', true,
+          '11111111-1111-4111-8111-000000000001', now());
+
+  v_chosen := app.path_resource_for('44444444-4444-4444-8444-00000000000d', v_sk);
+  perform t.assert_eq(v_chosen, 'dddddddd-0000-4000-8000-0000000000a1'::uuid,
+    'G2a. with neither enrolled, the tie breaks on kind then title - deterministically');
+
+  -- Now one on a course this family is actually using. Lucas is enrolled in
+  -- Teaching Textbooks Math 4 in the fixtures.
+  insert into public.learning_resources (id, course_id, kind, title, is_demo)
+  values ('dddddddd-0000-4000-8000-0000000000a3', v_course,
+          'practice','Z from their own course', false);
+  insert into public.resource_skills (resource_id, skill_id, source_type, confirmed,
+           confirmed_by, confirmed_at)
+  values ('dddddddd-0000-4000-8000-0000000000a3', v_sk, 'manual', true,
+          '11111111-1111-4111-8111-000000000001', now());
+  v_chosen := app.path_resource_for('44444444-4444-4444-8444-00000000000d', v_sk);
+  perform t.assert_eq(v_chosen, 'dddddddd-0000-4000-8000-0000000000a3'::uuid,
+    'G2b. material the family is actually enrolled in wins, even sorting last by title');
+end $$;
+rollback;
+
+-- H. Two legitimate candidates, two nodes. No padding to reach three.
+begin;
+do $$
+declare v text; v_n int;
+begin
+  perform t.logout();
+  perform t.p6_state('44444444-4444-4444-8444-00000000000d','NST.FR.1','developing','supported',
+                     '11111111-1111-4111-8111-000000000001');
+  perform t.p6_state('44444444-4444-4444-8444-00000000000d','NST.FR.2','developing','supported',
+                     '11111111-1111-4111-8111-000000000001');
+  perform t.p6_state('44444444-4444-4444-8444-00000000000d','NST.FR.3','developing','supported',
+                     '11111111-1111-4111-8111-000000000001');
+  v := t.p6_path('44444444-4444-4444-8444-00000000000d','NST.FR.1',
+                 '11111111-1111-4111-8111-000000000001', 5);
+  select count(*) into v_n from public.learning_path_nodes n where n.status <> 'removed';
+  perform t.assert_eq(v_n, 2,
+    'H1. when only two steps are reasonable, the path is two steps long');
+  perform t.assert_eq(v,
+    '1.NST.FR.4/continue_connected_skill | 2.NST.FR.5/continue_connected_skill',
+    'H2. and is exactly those two - nothing invented, nothing retaught to reach three');
+  perform t.assert_eq(
+    (select count(*)::int from public.learning_path_nodes n
+      where n.reason_code in ('enrichment','prerequisite_support')), 0,
+    'H3. no enrichment conjured and no prerequisite added to fill the horizon');
+end $$;
+rollback;
+
+-- I. A revisit she asked for reaches a confirmed skill, without material,
+--    and without touching what she confirmed.
+begin;
+do $$
+declare v text;
+begin
+  perform t.logout();
+  perform t.p6_evidence('44444444-4444-4444-8444-00000000000d','NST.FR.1','developing',
+                        '11111111-1111-4111-8111-000000000001');
+  perform t.login('11111111-1111-4111-8111-000000000001');
+  perform public.set_skill_state_override('44444444-4444-4444-8444-00000000000d',
+    (select id from public.skills where code='NST.FR.1'), 'secure', 'P6 confirmed');
+  perform public.request_skill_revisit('44444444-4444-4444-8444-00000000000d',
+    (select id from public.skills where code='NST.FR.1'), 'P6 let us look again');
+  perform t.logout();
+  v := t.p6_path('44444444-4444-4444-8444-00000000000d','NST.FR.1',
+                 '11111111-1111-4111-8111-000000000001');
+  perform t.assert(v like '%NST.FR.1/revisit_requested%',
+    'I1. a revisit she asked for puts a confirmed skill back in consideration');
+  perform t.assert(v not like '%NST.FR.1/revisit_requested+res%',
+    'I2. with no resource needed - her asking is reason enough');
+  perform t.assert_eq(
+    (select ss.skill_state::text from public.student_skills ss
+      join public.skills k on k.id = ss.skill_id
+     where ss.student_id = '44444444-4444-4444-8444-00000000000d' and k.code = 'NST.FR.1'),
+    'secure', 'I3. and it is still secure. Revisiting something is not doubting it');
+end $$;
+rollback;
+
+-- J. The advisory on its own inserts nothing.
+begin;
+do $$
+declare v text; v_adv jsonb;
+begin
+  perform t.logout();
+  perform t.p6_evidence('44444444-4444-4444-8444-00000000000d','NST.FR.1','developing',
+                        '11111111-1111-4111-8111-000000000001');
+  perform t.login('11111111-1111-4111-8111-000000000001');
+  perform public.set_skill_state_override('44444444-4444-4444-8444-00000000000d',
+    (select id from public.skills where code='NST.FR.1'), 'secure', 'P6 confirmed');
+  perform public.set_family_refresh_advisory(
+    (select family_id from public.students where id='44444444-4444-4444-8444-00000000000d'),
+    true, 7);
+  perform t.logout();
+  v := t.p6_path('44444444-4444-4444-8444-00000000000d','NST.FR.1',
+                 '11111111-1111-4111-8111-000000000001');
+  perform t.assert(v not like '%NST.FR.1/%',
+    'J1. the advisory on its own does not put a skill on the path');
+  perform t.assert(v not like '%revisit_requested%',
+    'J2. and is never mistaken for her having asked');
 end $$;
 rollback;

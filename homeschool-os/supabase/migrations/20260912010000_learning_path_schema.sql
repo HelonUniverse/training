@@ -87,6 +87,22 @@ create type app.path_status as enum (
 create type app.path_node_status as enum (
   'proposed', 'approved', 'removed', 'completed');
 
+-- --- what the family is heading for, and what to do on Monday ---------------
+-- These are different questions and collapsing them is how a plan starts lying.
+-- A mother who says "we're working toward multiplying fractions" has told us her
+-- destination; she has not told us her daughter is ready to multiply fractions
+-- this week. Nestra keeps both: the goal stays on the path, named and visible,
+-- and the actionable steps are the ones the evidence currently supports.
+--
+-- The alternative is the thing every product does - quietly drop the goal
+-- because the prerequisites are not there, or quietly present it as the next
+-- step because she asked for it. The first loses her intent; the second tells
+-- her a child is ready when nothing says so.
+
+create type app.path_node_kind as enum (
+  'actionable',    -- a reasonable next step, given what the evidence supports
+  'goal_target');  -- where the family is heading. Preserved, not presented as next
+
 create type app.path_event_kind as enum (
   'generated', 'regenerated', 'approved', 'rejected', 'paused', 'resumed',
   'archived', 'node_added', 'node_removed', 'node_reordered', 'node_completed');
@@ -224,6 +240,7 @@ create table public.learning_path_nodes (
   estimated_minutes        integer,
 
   status                   app.path_node_status not null default 'proposed',
+  node_kind                app.path_node_kind not null default 'actionable',
   supports_node_id         uuid references public.learning_path_nodes(id) on delete cascade,
 
   added_by_human           boolean not null default false,
@@ -252,10 +269,16 @@ alter table public.learning_path_nodes
   add constraint lpn_removal_names_its_actor_ck
     check (status <> 'removed' or (removed_by is not null and removed_at is not null));
 
--- One node per skill per path. A path that proposes the same skill twice is a
--- bug, and a parent who adds a skill already present should be told so.
+-- One LIVE node per skill per path. A path that proposes the same skill twice is
+-- a bug, and a parent who adds a skill already present should be told so.
+--
+-- Partial, and that is not a detail: a removed node stays on the path as the
+-- record of her decision, and a total index would mean that taking a skill off
+-- permanently barred her from putting it back. Found by the test where she
+-- removes one and then changes her mind.
 create unique index lpn_one_node_per_skill_idx
-  on public.learning_path_nodes (path_id, skill_id);
+  on public.learning_path_nodes (path_id, skill_id)
+  where status <> 'removed';
 
 -- Deferrable, because reordering swaps positions inside one statement and a
 -- swap is momentarily a duplicate.
@@ -271,6 +294,10 @@ comment on column public.learning_path_nodes.reason_detail is
 comment on column public.learning_path_nodes.resource_id is
   'Optional. A skill can sit on a path with nothing attached; that is said '
   'plainly in resource_note rather than filled with invented material.';
+comment on column public.learning_path_nodes.node_kind is
+  'A goal target is where the family said they are heading. It is on the path '
+  'and it is not the next step: presenting it as one would tell a parent her '
+  'child is ready for something nothing in the evidence supports.';
 comment on column public.learning_path_nodes.supports_node_id is
   'Set when this node exists to support the one it points at. One level only - '
   'there is no remediation staircase.';
