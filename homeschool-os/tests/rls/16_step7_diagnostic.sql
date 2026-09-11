@@ -698,7 +698,7 @@ begin
   perform t.assert_eq(
     (select count(*)::int from public.student_skill_events e
       where e.evidence_source = 'diagnostic_session'
-        and e.record_provenance = 'human_confirmed_ai_proposal'), 1,
+        and e.record_provenance = 'human_confirmed_system_observation'), 1,
     '22c. recorded as a diagnostic observation a person confirmed');
   perform t.assert_eq(
     (select o.review_status::text from public.diagnostic_observations o where o.id = v_obs),
@@ -806,3 +806,199 @@ select t.assert_eq((select count(*)::int from public.skill_prerequisites
   'Z3. no prerequisite was created');
 select t.assert_eq((select count(*)::int from public.diagnostic_items where is_seed), 19,
   'Z4. nineteen seed items across the slice');
+
+-- =============================================================================
+-- 25. Provenance: a deterministic observation is not an AI proposal
+-- =============================================================================
+-- The engine in 0093 is arithmetic over the prerequisite graph and the child's
+-- own profile. No model is consulted and none can be. Labelling its evidence
+-- `human_confirmed_ai_proposal` told a parent - and any evaluator reading her
+-- portfolio - that a model had proposed something about her child, which is
+-- false in the one column somebody would read to find out.
+--
+-- The four meanings, kept apart:
+--   human_entered                       a person originated it.
+--   human_confirmed_ai_proposal         a model proposed it, a person said yes.
+--   human_confirmed_system_observation  Nestra observed it deterministically,
+--                                       a person said yes.
+--   system_computed                     derived, with no confirmation behind it.
+
+select t.assert_eq(
+  (select string_agg(e.enumlabel, ', ' order by e.enumsortorder)
+     from pg_enum e join pg_type ty on ty.oid = e.enumtypid
+     join pg_namespace n on n.oid = ty.typnamespace
+    where n.nspname = 'app' and ty.typname = 'record_provenance'),
+  'human_entered, human_confirmed_ai_proposal, human_confirmed_system_observation, '
+  || 'ai_proposed_unreviewed, document_extraction, provider_import, system_computed, unknown',
+  '25a. the new label sits beside the one it is distinguished from');
+
+select t.assert_eq(
+  (select count(*)::int from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname in ('app','public')
+      and p.proname in ('confirm_diagnostic_observation','reject_diagnostic_observation',
+                        'record_diagnostic_observation','start_diagnostic_session',
+                        'diagnostic_present','diagnostic_finish')
+      and p.prosrc ~ '\mhuman_confirmed_ai_proposal\M'),
+  0, '25b. no diagnostic function so much as mentions the AI-proposal label');
+
+begin;
+do $$
+declare j jsonb; si uuid; v_sess uuid; v_obs uuid; e record; v jsonb;
+begin
+  perform t.logout();
+  perform t.login('11111111-1111-4111-8111-000000000001');
+  j := public.start_diagnostic_session('44444444-4444-4444-8444-00000000000d',
+        (select id from public.skills where code='NST.FR.1'));
+  v_sess := (j->>'session')::uuid; si := (j->>'session_item')::uuid;
+  j := public.record_diagnostic_observation(si,'demonstrated','P5');
+  select o.id into v_obs from public.diagnostic_observations o where o.session_item_id = si;
+
+  -- Before any human looks at it, the observation is not evidence at all.
+  perform t.assert_eq(
+    (select count(*)::int from public.student_skill_events e2
+      where e2.evidence_source = 'diagnostic_session'), 0,
+    '25c. an unreviewed observation has written no evidence');
+  perform t.assert_eq(
+    (select count(*)::int from public.student_skills ss join public.skills k on k.id = ss.skill_id
+      where ss.student_id = '44444444-4444-4444-8444-00000000000d'
+        and k.code like 'NST.FR.%'), 0,
+    '25d. and no profile row - recording an observation changes nothing about the child');
+
+  j := public.confirm_diagnostic_observation(v_obs, 'developing', 'P5 I watched her');
+
+  select e2.record_provenance::text as prov, e2.evidence_source::text as src,
+         e2.ai_suggestion_id as sug
+    into e
+    from public.student_skill_events e2
+   where e2.id = (select o.promoted_event_id from public.diagnostic_observations o
+                   where o.id = v_obs);
+
+  perform t.assert_eq(e.prov, 'human_confirmed_system_observation',
+    '25e. a confirmed diagnostic observation is a confirmed SYSTEM observation');
+  perform t.assert_eq(e.src, 'diagnostic_session',
+    '25f. and the evidence source is still the diagnostic session');
+  perform t.assert(e.sug is null,
+    '25g. it names no AI suggestion, because there was never one to name');
+
+  -- It is evidence a person stands behind, and must still be counted as such.
+  v := app.compute_skill_state('44444444-4444-4444-8444-00000000000d',
+                               (select id from public.skills where code='NST.FR.1'));
+  perform t.assert_eq((v->>'usable_evidence_count')::int, 1,
+    '25h. the confirmed observation is usable evidence');
+  perform t.assert_eq((v->'sufficiency_inputs'->>'human_entered_or_confirmed')::int, 1,
+    '25i. and counts as an observation a person stands behind, as it did before');
+  perform t.assert_eq(v->>'rule_version', '2026-09-09.2',
+    '25j. under the unchanged profile rule version');
+  perform t.assert(v->>'computed_state' <> 'secure',
+    '25k. and still cannot arrive at secure');
+end $$;
+rollback;
+
+-- An observation the parent rejected never becomes evidence under any label.
+begin;
+do $$
+declare j jsonb; si uuid; v_obs uuid;
+begin
+  perform t.logout();
+  perform t.login('11111111-1111-4111-8111-000000000001');
+  j := public.start_diagnostic_session('44444444-4444-4444-8444-00000000000d',
+        (select id from public.skills where code='NST.FR.1'));
+  si := (j->>'session_item')::uuid;
+  j := public.record_diagnostic_observation(si,'demonstrated','P5');
+  select o.id into v_obs from public.diagnostic_observations o where o.session_item_id = si;
+  perform public.reject_diagnostic_observation(v_obs, 'P5 that was me helping');
+  perform t.assert_eq(
+    (select count(*)::int from public.student_skill_events e
+      where e.evidence_source = 'diagnostic_session'), 0,
+    '25l. a rejected observation writes no evidence of any provenance');
+end $$;
+rollback;
+
+-- The old label is refused for diagnostic evidence, not merely unwritten.
+begin;
+do $$
+declare v_ss uuid; v_sk uuid; v_org uuid;
+begin
+  perform t.logout();
+  select id into v_sk from public.skills where code = 'NST.FR.1';
+  select primary_organization_id into v_org from public.students
+   where id = '44444444-4444-4444-8444-00000000000d';
+  insert into public.student_skills (student_id, skill_id, organization_id, source_type,
+           record_provenance, evidence_source, skill_state, created_by)
+  values ('44444444-4444-4444-8444-00000000000d', v_sk, v_org, 'observation',
+          'human_entered', 'diagnostic_session', 'unknown',
+          '11111111-1111-4111-8111-000000000001')
+  returning id into v_ss;
+
+  begin
+    insert into public.student_skill_events (student_skill_id, student_id, skill_id,
+             organization_id, occurred_on, evidence_note, skill_state, source_type,
+             evidence_source, record_provenance, created_by)
+    values (v_ss, '44444444-4444-4444-8444-00000000000d', v_sk, v_org, current_date,
+            'P5', 'developing', 'observation', 'diagnostic_session',
+            'human_confirmed_ai_proposal', '11111111-1111-4111-8111-000000000001');
+    perform t.assert(false,
+      '25m. diagnostic evidence was accepted as a confirmed AI proposal');
+  exception when check_violation then
+    perform t.assert(true,
+      '25m. diagnostic evidence naming no suggestion cannot claim a model proposed it');
+  end;
+
+  -- Evidence from anywhere else is untouched by this rule: a genuine confirmed
+  -- AI proposal is still a genuine confirmed AI proposal.
+  insert into public.student_skill_events (student_skill_id, student_id, skill_id,
+           organization_id, occurred_on, evidence_note, skill_state, source_type,
+           evidence_source, record_provenance, created_by)
+  values (v_ss, '44444444-4444-4444-8444-00000000000d', v_sk, v_org, current_date,
+          'P5 elsewhere', 'developing', 'observation', 'portfolio_artifact',
+          'human_confirmed_ai_proposal', '11111111-1111-4111-8111-000000000001');
+  perform t.assert_eq(
+    (select count(*)::int from public.student_skill_events e
+      where e.evidence_note = 'P5 elsewhere'
+        and e.record_provenance = 'human_confirmed_ai_proposal'), 1,
+    '25n. confirmed AI proposals from elsewhere are unaffected');
+end $$;
+rollback;
+
+-- The invariant refuses a confirm path that goes back to the old label. This is
+-- the test that would have caught the original mistake.
+begin;
+do $$
+begin
+  perform t.logout();
+  execute $x$
+    create or replace function public.confirm_diagnostic_observation(
+      p_observation uuid, p_skill_state text default null, p_note text default null)
+    returns jsonb language plpgsql security invoker set search_path = '' as $body$
+    begin
+      -- 'human_confirmed_ai_proposal'
+      return jsonb_build_object('observation', p_observation);
+    end $body$;
+  $x$;
+  begin
+    perform app.assert_schema_invariants();
+    perform t.assert(false,
+      '25o. the invariants accepted a confirm path that calls its evidence an AI proposal');
+  exception when others then
+    perform t.assert(sqlerrm like '%false provenance%',
+      '25o. the invariants refuse a confirm path that calls its evidence an AI proposal');
+  end;
+end $$;
+rollback;
+
+-- And refuses the loss of the constraint behind it.
+begin;
+do $$
+begin
+  perform t.logout();
+  alter table public.student_skill_events
+    drop constraint sse_diagnostic_evidence_is_not_an_ai_proposal_ck;
+  begin
+    perform app.assert_schema_invariants();
+    perform t.assert(false, '25p. the invariants accepted the constraint being dropped');
+  exception when others then
+    perform t.assert(sqlerrm like '%recorded as an AI proposal%',
+      '25p. the invariants refuse the loss of the constraint behind it');
+  end;
+end $$;
+rollback;

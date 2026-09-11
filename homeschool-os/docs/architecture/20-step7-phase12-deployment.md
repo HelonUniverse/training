@@ -63,6 +63,7 @@ sides carry the same three new types and neither carries the two retired ones.
                               assessment_instrument, provider_system,
                               portfolio_artifact, diagnostic_session, unknown
     app.record_provenance     human_entered, human_confirmed_ai_proposal,
+                              (human_confirmed_system_observation added by 0096)
                               ai_proposed_unreviewed, document_extraction,
                               provider_import, system_computed, unknown
 

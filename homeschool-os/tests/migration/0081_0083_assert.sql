@@ -90,9 +90,14 @@ begin
     '4c. a row that said nothing about provenance came out unknown, not human_entered');
 
   -- ------------------------------------------------ nothing gained or lost ---
-  select count(*)::int into v_n from public.student_skills where notes like 'MIGTEST%';
+  -- The legacy seed only. `before_*.sql` files seed rows later, against a
+  -- schema these migrations produced, and counting those here would make this
+  -- assertion drift every time one is added.
+  select count(*)::int into v_n from public.student_skills
+   where notes like 'MIGTEST%' and notes not like 'MIGTEST % profile';
   perform t.assert_eq(v_n, 7, '5a. every seeded row survived the migration');
-  select count(*)::int into v_n from public.student_skill_events where evidence_note like 'MIGTEST%';
+  select count(*)::int into v_n from public.student_skill_events
+   where evidence_note like 'MIGTEST%' and evidence_note like 'MIGTEST event%';
   perform t.assert_eq(v_n, 2, '5b. and every seeded event');
 
   select skill_state::text into v_state from public.student_skill_events
@@ -252,5 +257,75 @@ select t.assert_eq(
    where o.carried_forward
      and coalesce(ss.human_confirmed_by, ss.entered_by, ss.created_by, ss.updated_by) is null),
   '10g. rows that named nobody are carried anonymously rather than attributed to a guardian');
+
+-- =============================================================================
+-- 11. The 0096-0097 provenance correction, over the rows seeded before it ran
+-- =============================================================================
+-- Phase 5 routing is deterministic. Evidence that came out of it was being
+-- labelled `human_confirmed_ai_proposal`, which told a parent - and any
+-- evaluator reading her portfolio - that a model had proposed something about
+-- her child when no model was ever consulted.
+
+select t.assert_eq(
+  (select record_provenance::text from public.student_skill_events
+    where evidence_note = 'MIGTEST diagnostic mislabelled'),
+  'human_confirmed_system_observation',
+  '11a. diagnostic evidence a person confirmed is a confirmed SYSTEM observation');
+
+select t.assert_eq(
+  (select record_provenance::text from public.student_skill_events
+    where evidence_note = 'MIGTEST portfolio ai confirmed'),
+  'human_confirmed_ai_proposal',
+  '11b. and a genuine confirmed AI proposal from elsewhere was left alone');
+
+select t.assert_eq(
+  (select evidence_source::text from public.student_skill_events
+    where evidence_note = 'MIGTEST diagnostic mislabelled'),
+  'diagnostic_session',
+  '11c. the source is untouched - only the claim about who proposed it moved');
+
+select t.assert_eq(
+  (select skill_state::text from public.student_skill_events
+    where evidence_note = 'MIGTEST diagnostic mislabelled'),
+  'developing',
+  '11d. and what the observation says about the child is untouched');
+
+-- The relabelled row must still count toward the profile. If 0097 had changed
+-- the label without teaching app.compute_skill_state about it, this evidence
+-- would have stopped counting as human-origin and the child's sufficiency would
+-- have quietly dropped.
+do $$
+declare v jsonb; r record;
+begin
+  select ss.student_id, ss.skill_id into r from public.student_skills ss
+   where ss.notes = 'MIGTEST diagnostic profile';
+  v := app.compute_skill_state(r.student_id, r.skill_id);
+  perform t.assert_eq((v->>'usable_evidence_count')::int, 1,
+    '11e. the relabelled observation is still usable evidence');
+  perform t.assert_eq(
+    (v->'sufficiency_inputs'->>'human_entered_or_confirmed')::int, 1,
+    '11f. and still counts as an observation a person stands behind');
+  perform t.assert_eq(v->>'rule_version', '2026-09-09.2',
+    '11g. under the same rule version - nothing about the child was recomputed');
+end $$;
+
+-- The old label is unreachable for diagnostic evidence, not merely unwritten.
+do $$
+declare r record;
+begin
+  select ss.id, ss.student_id, ss.skill_id into r from public.student_skills ss
+   where ss.notes = 'MIGTEST diagnostic profile';
+  begin
+    insert into public.student_skill_events
+      (student_skill_id, student_id, skill_id, occurred_on, evidence_note, skill_state,
+       source_type, evidence_source, record_provenance, created_by)
+    values (r.id, r.student_id, r.skill_id, current_date, 'MIGTEST refused', 'developing',
+            'observation', 'diagnostic_session', 'human_confirmed_ai_proposal',
+            '11111111-1111-4111-8111-000000000001');
+    raise exception
+      'ASSERTION FAILED: 11h. diagnostic evidence was accepted as a confirmed AI proposal';
+  exception when check_violation then null;
+  end;
+end $$;
 
 select t.assert(true, '--- migration regression complete ---');

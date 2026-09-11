@@ -257,3 +257,65 @@ the product):
 2. The standards arm inserted into `public.skill_standards` with invented column
    names and silently reported the error as its result. Fixed to the real
    columns, which is what made arm 2 a real test instead of a caught exception.
+
+---
+
+# Addendum, 2026-09-11 — the provenance patch (0096-0097)
+
+Phase 5 was approved with one required correction:
+`confirm_diagnostic_observation` was writing its evidence as
+`human_confirmed_ai_proposal`, which is false. The routing engine is
+deterministic and consults no model, so its evidence is a **system** observation
+that a person confirmed.
+
+## Applied
+
+| # | file | managed name |
+|---|---|---|
+| 0096 | `20260911020000_provenance_system_observation_enum.sql` | `step7_provenance_system_observation_enum` |
+| 0097 | `20260911020100_provenance_system_observation.sql` | `step7_provenance_system_observation` |
+
+Split in two because PostgreSQL adds an enum value inside a transaction but will
+not let the same transaction use it.
+
+## Behaviour, identical on both databases
+
+Line for line, local and managed:
+
+```
+provenance labels             human_entered, human_confirmed_ai_proposal,
+                              human_confirmed_system_observation, ai_proposed_unreviewed,
+                              document_extraction, provider_import, system_computed, unknown
+before review: evidence rows  0
+before review: profile rows   0
+confirmed: provenance         human_confirmed_system_observation
+confirmed: evidence source    diagnostic_session
+confirmed: names no suggestion true
+confirmed: asserts            developing
+usable evidence               1
+human entered or confirmed    1
+computed state                emerging
+effective state               emerging
+profile rule version          2026-09-09.2
+hand-written AI label         refused: sse_diagnostic_evidence_is_not_an_ai_proposal_ck
+AI label from elsewhere       accepted, as it should be
+invariants                    pass
+```
+
+## Catalogue parity
+
+13 of 14 digest rows identical, `canonical_function_bodies 146 /
+2fa88670e877ba929ba5594b905a1fb6` and `enum_labels 704 /
+2ee8a25d86620c0153c2b14a8d094933` among them — the new label sits in the same
+sort position on both. The three functions this patch replaced
+(`confirm_diagnostic_observation`, `app.compute_skill_state`,
+`app.assert_schema_invariants`) are **byte-identical** on both sides. The raw
+`function_bodies` row still differs by the standing 25 STEP 2-6 drifts.
+
+## Unchanged
+
+`rls_digest` `44a0ff66…` · `step6_digest` `b0c0d24c…` · standards 184 · mappings
+0 · profile rule version `2026-09-09.2` · diagnostic rule version `2026-09-11.1`
+· families with the advisory on 0 · 19 seed items · profile rows, events,
+sessions and observations all 0, so the probes rolled back · the append-only
+trigger on `student_skill_events` is enabled (`O`).

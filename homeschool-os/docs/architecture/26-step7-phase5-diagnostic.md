@@ -48,7 +48,7 @@ Observations steer the rest of their own session and are written **nowhere else*
 The diagnostic never inserts into `student_skills` or `student_skill_events` from
 its routing path; only `confirm_diagnostic_observation`, driven by a person,
 creates an evidence event — `evidence_source = 'diagnostic_session'`,
-`record_provenance = 'human_confirmed_ai_proposal'`. So the engine cannot read
+`record_provenance = 'human_confirmed_system_observation'`. So the engine cannot read
 back its own unreviewed guess as established evidence and grow more confident
 from it. Test 13 asserts that two demonstrated observations produce zero evidence
 rows and zero profile rows.
@@ -106,3 +106,32 @@ This replaces the unreachable rule the first build shipped with: the frontier
 guarantees every in-branch prerequisite is already established, so "probe an
 unestablished prerequisite" could never fire, and the first smoke run produced no
 probe at all.
+
+---
+
+## Provenance correction, 2026-09-11 (migrations 0096-0097)
+
+This document originally said the confirmed evidence was written as
+`human_confirmed_ai_proposal`, and so did the code. That was wrong, and wrong in
+the direction that matters: the Phase 5 engine is arithmetic over the
+prerequisite graph and the child's own profile, with no model anywhere in its
+path, and `record_provenance` is the column an evaluator reads to find out where
+a child's evidence came from. Saying "a model proposed this" about a child's
+fraction work, when nothing did, is a false statement about that family.
+
+`app.record_provenance` now carries a fourth human-facing label, and the four
+meanings are kept apart:
+
+| label | meaning |
+|---|---|
+| `human_entered` | a person originated the record |
+| `human_confirmed_ai_proposal` | a model proposed it, a person confirmed it |
+| `human_confirmed_system_observation` | Nestra observed it deterministically, a person confirmed it |
+| `system_computed` | derived by Nestra, with no human confirmation behind it |
+
+`confirm_diagnostic_observation` writes the new label;
+`app.compute_skill_state` counts it as a human-origin observation exactly as it
+counted the old one, so no child's sufficiency moved; and a check constraint
+plus two invariants make the old label unreachable for diagnostic evidence
+unless the row names a real AI suggestion. The profile rule version deliberately
+did not move - nothing about any child was recomputed.

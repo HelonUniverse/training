@@ -64,7 +64,19 @@ n=$(su postgres -c "$PSQL -d $DB -tAc 'select count(*) from public.student_skill
 if [ "$n" -lt 7 ]; then echo "FAIL: only $n rows seeded"; exit 1; fi
 echo "ok ($n rows)"
 
+# A migration whose subject is rows written by a LATER migration cannot be
+# tested by the legacy seed above - at 0080 the columns it needs do not exist
+# yet. So any file named tests/migration/before_<migration>.sql runs immediately
+# before that migration does, seeding the state it is supposed to fix. Without
+# this, 0097's backfill runs over nothing and passes for the wrong reason, which
+# is the failure mode this whole harness exists to prevent.
 for f in "${UNDER_TEST[@]}"; do
+  PRE="$ROOT/tests/migration/before_$f"
+  if [ -f "$PRE" ]; then
+    printf '  seeding before %s ... ' "$f"
+    su postgres -c "$PSQL -d $DB -f $PRE" >/dev/null
+    echo ok
+  fi
   printf '  applying %s ... ' "$f"
   su postgres -c "$PSQL -d $DB -f $ROOT/supabase/migrations/$f" >/dev/null
   echo ok

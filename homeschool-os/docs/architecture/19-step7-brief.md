@@ -133,7 +133,7 @@ Split into three distinct concepts, each its own column:
    leaves evidence confidence untouched, and that changing only evidence
    confidence does not by itself change a skill state.
 3. **Record provenance** — *how this row came to exist.* Proposed:
-   `human_entered · human_confirmed_ai_proposal · ai_proposed_unreviewed ·
+   `human_entered · human_confirmed_ai_proposal · human_confirmed_system_observation · ai_proposed_unreviewed ·
    document_extraction · provider_import · system_computed`.
 
 Hard invariant on the third axis: a row whose provenance is
