@@ -74,6 +74,34 @@ const BANNED = [
   [/\bya deber[ií]as saber\b/i,         'nobody owes a skill by a date'],
   [/\breprob[óo]\b/i,                   'an observation that did not demonstrate a skill is not a failure'],
   [/\bdeficien(te|cia)\b/i,             'Nestra describes what it can support, never what is missing from a child'],
+  // STEP 7 phase 6. A learning path is where school sneaks back in, because a
+  // list of what to do next looks exactly like a syllabus. The forbidden
+  // sentences are the ones that turn a suggestion into a verdict: they compare
+  // the child to a schedule she never chose, or describe the plan as owed work
+  // rather than as an invitation.
+  [/\bnext grade\b/i,                  'a path follows this child, not a grade sequence'],
+  [/\bon grade level\b/i,              'there is no grade level in a child-paced path'],
+  [/\bexpected for (age|grade)\b/i,    'nothing here is expected of a child by a date'],
+  [/\bscope and sequence\b/i,          'a suggestion is not a syllabus a family owes'],
+  [/\byear[- ]?long plan\b/i,          'the path answers what to explore next, not what a year looks like'],
+  [/\bassigned to (your child|her|him)\b/i, 'Nestra proposes; it never assigns'],
+  [/\brequired (next step|lesson|path)\b/i, 'a proposal a parent can reject is not required'],
+  [/\bmissing skills?\b/i,             'an absence of evidence is not a missing skill'],
+  [/\bknowledge gaps?\b/i,             'a gap in our records is not a gap in a child'],
+  [/\breadiness score\b/i,             'readiness is a set of reasons, never a number'],
+  // Key-scoped, for the same reason `overdue` is. The catalogs already use
+  // "mastery level" to DENY one - "nothing here is a grade or a mastery level" -
+  // and banning the phrase outright would delete the sentence that makes the
+  // promise. What must not happen is a path CLAIMING one, so the rule watches
+  // the path keys.
+  [/\bmastery (level|percent)/i,        'a child is not a percentage', /^path\./],
+  [/\bpr[óo]ximo grado\b/i,            'a path follows this child, not a grade sequence'],
+  [/\ben el nivel de (su )?grado\b/i,  'there is no grade level in a child-paced path'],
+  [/\besperado para (la edad|el grado)\b/i, 'nothing here is expected of a child by a date'],
+  [/\bdestrezas? faltantes?\b/i,       'an absence of evidence is not a missing skill'],
+  [/\bvac[íi]os? de conocimiento\b/i,  'a gap in our records is not a gap in a child'],
+  [/\bnivel de dominio\b/i,            'a child is not a percentage', /^path\./],
+  [/\basignad[oa] a (tu|su) (hija|hijo)\b/i, 'Nestra proposes; it never assigns'],
   // Spanish - the same claims, which is the point of checking both catalogs
   [/\best[áa]ndar requerido\b/i,        'a standard is a reference, never a requirement'],
   [/\bdebe completar\b/i,               'nothing must be completed by a date'],
