@@ -31,6 +31,13 @@ export default function GuiaPerfilScreen() {
   }
 
   const guideServices = servicesOfGuide(guide.id);
+  // Solo se enseña lo que se sabe. Una guía recién llegada no tiene años
+  // registrados ni valoración, y fingirlos sería inventarle un prestigio.
+  const stats = [
+    guide.years > 0 ? { value: `${guide.years}`, label: 'años de práctica' } : null,
+    guide.rating > 0 ? { value: guide.rating.toFixed(1), label: 'valoración', accent: true } : null,
+    guide.circleCount > 0 ? { value: `${guide.circleCount}`, label: 'círculos' } : null,
+  ].filter(Boolean) as { value: string; label: string; accent?: boolean }[];
   const guideTeachings = teachings.filter((t) => t.authorId === guide.id);
   const guideCircles = circles.filter((c) => c.guideId === guide.id);
 
@@ -43,19 +50,24 @@ export default function GuiaPerfilScreen() {
           {guide.verified ? <Feather name="check-circle" size={16} color={colors.cyan} /> : null}
         </View>
         <Text style={styles.role}>{guide.title}</Text>
-        <View style={styles.locationRow}>
-          <Feather name="map-pin" size={12} color={colors.textMuted} />
-          <Text style={styles.location}>{guide.location}</Text>
-        </View>
+        {guide.location ? (
+          <View style={styles.locationRow}>
+            <Feather name="map-pin" size={12} color={colors.textMuted} />
+            <Text style={styles.location}>{guide.location}</Text>
+          </View>
+        ) : null}
       </View>
 
-      <View style={styles.stats}>
-        <Stat value={`${guide.years}`} label="años de práctica" />
-        <View style={styles.statDivider} />
-        <Stat value={guide.rating.toFixed(1)} label="valoración" accent />
-        <View style={styles.statDivider} />
-        <Stat value={`${guide.circleCount}`} label="círculos" />
-      </View>
+      {stats.length > 0 ? (
+        <View style={styles.stats}>
+          {stats.map((s, i) => (
+            <React.Fragment key={s.label}>
+              {i > 0 ? <View style={styles.statDivider} /> : null}
+              <Stat value={s.value} label={s.label} accent={s.accent} />
+            </React.Fragment>
+          ))}
+        </View>
+      ) : null}
 
       <View style={styles.section}>
         <Text style={styles.bio}>{guide.bio}</Text>
@@ -69,33 +81,37 @@ export default function GuiaPerfilScreen() {
         </View>
       </View>
 
-      <View style={styles.section}>
-        <Button
-          label="Ver sus servicios"
-          icon="calendar"
-          full
-          size="lg"
-          onPress={() => router.push(`/servicios?guideId=${guide.id}`)}
-        />
-      </View>
+      {guideServices.length > 0 ? (
+        <>
+          <View style={styles.section}>
+            <Button
+              label="Ver sus servicios"
+              icon="calendar"
+              full
+              size="lg"
+              onPress={() => router.push(`/servicios?guideId=${guide.id}`)}
+            />
+          </View>
 
-      <View style={styles.section}>
-        <SectionHeader
-          overline="Servicios"
-          title={`${guideServices.length} formas de trabajar`}
-          actionLabel="Ver todos"
-          onAction={() => router.push(`/servicios?guideId=${guide.id}`)}
-        />
-      </View>
-      <View style={styles.list}>
-        {guideServices.slice(0, 2).map((s) => (
-          <ServiceCard
-            key={s.id}
-            service={s}
-            onPress={() => router.push(`/reserva/${s.id}`)}
-          />
-        ))}
-      </View>
+          <View style={styles.section}>
+            <SectionHeader
+              overline="Servicios"
+              title={`${guideServices.length} formas de trabajar`}
+              actionLabel="Ver todos"
+              onAction={() => router.push(`/servicios?guideId=${guide.id}`)}
+            />
+          </View>
+          <View style={styles.list}>
+            {guideServices.slice(0, 2).map((s) => (
+              <ServiceCard
+                key={s.id}
+                service={s}
+                onPress={() => router.push(`/reserva/${s.id}`)}
+              />
+            ))}
+          </View>
+        </>
+      ) : null}
 
       {guideTeachings.length > 0 ? (
         <>

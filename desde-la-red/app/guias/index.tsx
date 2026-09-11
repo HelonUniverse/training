@@ -37,7 +37,7 @@ export default function GuiasScreen() {
       <View style={styles.head}>
         <Text style={styles.title}>Quién puede{'\n'}acompañarte</Text>
         <Text style={styles.lead}>
-          {guides.length} guías verificadas por la Red. Cada una con su propia forma de escuchar.
+          {guides.length} guías en la Red. Cada una con su propia forma de escuchar.
         </Text>
       </View>
 

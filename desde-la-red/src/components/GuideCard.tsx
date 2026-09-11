@@ -36,10 +36,12 @@ export function GuideCard({ guide, onPress, variant = 'row' }: Props) {
         <Text style={styles.tileTitle} numberOfLines={2}>
           {guide.title}
         </Text>
-        <View style={styles.ratingRow}>
-          <Feather name="star" size={11} color={colors.glow} />
-          <Text style={styles.rating}>{guide.rating.toFixed(1)}</Text>
-        </View>
+        {guide.rating > 0 ? (
+          <View style={styles.ratingRow}>
+            <Feather name="star" size={11} color={colors.glow} />
+            <Text style={styles.rating}>{guide.rating.toFixed(1)}</Text>
+          </View>
+        ) : null}
       </Pressable>
     );
   }
@@ -62,13 +64,23 @@ export function GuideCard({ guide, onPress, variant = 'row' }: Props) {
         <Text style={styles.title} numberOfLines={1}>
           {guide.title}
         </Text>
-        <View style={styles.metaRow}>
-          <Feather name="map-pin" size={10.5} color={colors.textMuted} />
-          <Text style={styles.meta}>{guide.location}</Text>
-          <View style={styles.dot} />
-          <Feather name="star" size={10.5} color={colors.glow} />
-          <Text style={styles.meta}>{guide.rating.toFixed(1)}</Text>
-        </View>
+        {guide.location || guide.rating > 0 ? (
+          <View style={styles.metaRow}>
+            {guide.location ? (
+              <>
+                <Feather name="map-pin" size={10.5} color={colors.textMuted} />
+                <Text style={styles.meta}>{guide.location}</Text>
+              </>
+            ) : null}
+            {guide.location && guide.rating > 0 ? <View style={styles.dot} /> : null}
+            {guide.rating > 0 ? (
+              <>
+                <Feather name="star" size={10.5} color={colors.glow} />
+                <Text style={styles.meta}>{guide.rating.toFixed(1)}</Text>
+              </>
+            ) : null}
+          </View>
+        ) : null}
         <View style={styles.chips}>
           {guide.approach.slice(0, 2).map((a) => (
             <Chip key={a} label={a} size="sm" />
