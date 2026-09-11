@@ -194,6 +194,152 @@ end $$;
 rollback;
 
 -- =============================================================================
+-- 7A-7G. The prerequisite probe predicate, in full
+-- =============================================================================
+-- Approved 2026-09-11. After the floor, at most one probe, targeting a DIRECT
+-- prerequisite of the floored skill that was not observed this session and is
+-- not human-confirmed secure. Ties break on skill code. Nothing eligible means
+-- no probe at all.
+
+-- A. the prerequisite is established from the profile and unseen today
+begin;
+do $$
+declare v_route text;
+begin
+  perform t.logout();
+  perform t.p5_establish('44444444-4444-4444-8444-00000000000d','NST.FR.1','11111111-1111-4111-8111-000000000001');
+  perform t.p5_establish('44444444-4444-4444-8444-00000000000d','NST.FR.2','11111111-1111-4111-8111-000000000001');
+  v_route := t.p5_run('44444444-4444-4444-8444-00000000000d','NST.FR.1',
+                      '11111111-1111-4111-8111-000000000001',
+                      array['not_demonstrated','not_demonstrated','demonstrated']);
+  perform t.assert(v_route like '%NST.FR.2/prerequisite_probe/demonstrated%',
+    '7A. a direct prerequisite taken on trust, unseen today, gets exactly one probe');
+  perform t.assert_eq(
+    (select count(*)::int from public.diagnostic_session_items where reason_code='prerequisite_probe'),
+    1, '7A2. exactly one');
+end $$;
+rollback;
+
+-- B. the prerequisite was demonstrated during this very session
+begin;
+do $$
+declare v_route text;
+begin
+  perform t.logout();
+  v_route := t.p5_run('44444444-4444-4444-8444-00000000000d','NST.FR.1',
+                      '11111111-1111-4111-8111-000000000001',
+                      array['demonstrated','demonstrated','not_demonstrated','not_demonstrated']);
+  perform t.assert_eq(
+    (select count(*)::int from public.diagnostic_session_items where reason_code='prerequisite_probe'),
+    0, '7B. a prerequisite she demonstrated twenty minutes ago is not asked again');
+  perform t.assert(v_route like '%[stop=frustration_floor]', '7B2. the branch simply ends');
+end $$;
+rollback;
+
+-- C. the prerequisite is human-confirmed secure
+begin;
+do $$
+declare v_route text; v_before text;
+begin
+  perform t.logout();
+  perform t.p5_establish('44444444-4444-4444-8444-00000000000d','NST.FR.1','11111111-1111-4111-8111-000000000001');
+  perform t.p5_establish('44444444-4444-4444-8444-00000000000d','NST.FR.2','11111111-1111-4111-8111-000000000001');
+  perform t.login('11111111-1111-4111-8111-000000000001');
+  perform public.set_skill_state_override('44444444-4444-4444-8444-00000000000d',
+     (select id from public.skills where code='NST.FR.2'), 'secure', 'P5 she is solid here');
+  perform t.logout();
+  select ss.skill_state::text into v_before from public.student_skills ss
+   where ss.student_id='44444444-4444-4444-8444-00000000000d'
+     and ss.skill_id=(select id from public.skills where code='NST.FR.2');
+
+  v_route := t.p5_run('44444444-4444-4444-8444-00000000000d','NST.FR.1',
+                      '11111111-1111-4111-8111-000000000001',
+                      array['not_demonstrated','not_demonstrated']);
+  perform t.assert_eq(
+    (select count(*)::int from public.diagnostic_session_items where reason_code='prerequisite_probe'),
+    0, '7C. a prerequisite a parent confirmed secure is not re-tested because the next skill went badly');
+  perform t.assert(v_route not like '%NST.FR.2%', '7C2. it is not asked about at all');
+
+  -- G, on the same fixture: her judgement is exactly where she left it
+  perform t.assert_eq(
+    (select ss.skill_state::text from public.student_skills ss
+      where ss.student_id='44444444-4444-4444-8444-00000000000d'
+        and ss.skill_id=(select id from public.skills where code='NST.FR.2')),
+    v_before, '7G. and the secure state is untouched by the failure downstream');
+  perform t.assert_eq(v_before, 'secure', '7G2. which is to say: still secure');
+end $$;
+rollback;
+
+-- D. two equally-near prerequisites, one deterministic choice
+begin;
+do $$
+declare v_route text; a text; b text;
+begin
+  perform t.logout();
+  perform t.p5_establish('44444444-4444-4444-8444-00000000000d','NST.FR.1','11111111-1111-4111-8111-000000000001');
+  perform t.p5_establish('44444444-4444-4444-8444-00000000000d','NST.FR.2','11111111-1111-4111-8111-000000000001');
+  perform t.p5_establish('44444444-4444-4444-8444-00000000000d','NST.FR.3','11111111-1111-4111-8111-000000000001');
+  perform t.p5_establish('44444444-4444-4444-8444-00000000000d','NST.FR.4','11111111-1111-4111-8111-000000000001');
+  -- NST.FR.5 has two direct prerequisites, FR.3 and FR.4, and both are eligible
+  a := t.p5_run('44444444-4444-4444-8444-00000000000d','NST.FR.1',
+                '11111111-1111-4111-8111-000000000001',
+                array['not_demonstrated','not_demonstrated','demonstrated']);
+  perform t.assert(a like '%NST.FR.5/explore_next_skill%', '7D. the session opens at the only unestablished skill');
+  perform t.assert(a like '%NST.FR.3/prerequisite_probe/%',
+    '7D2. and the tie between two equally-near prerequisites breaks on skill code');
+  perform t.assert_eq(
+    (select count(*)::int from public.diagnostic_session_items where reason_code='prerequisite_probe'),
+    1, '7D3. one probe, not two');
+  b := t.p5_run('44444444-4444-4444-8444-00000000000d','NST.FR.1',
+                '11111111-1111-4111-8111-000000000001',
+                array['not_demonstrated','not_demonstrated','demonstrated']);
+  perform t.assert_eq(a, b, '7D4. and the same tie breaks the same way every time');
+end $$;
+rollback;
+
+-- E. the probe itself does not demonstrate the skill
+begin;
+do $$
+declare v_route text;
+begin
+  perform t.logout();
+  perform t.p5_establish('44444444-4444-4444-8444-00000000000d','NST.FR.1','11111111-1111-4111-8111-000000000001');
+  perform t.p5_establish('44444444-4444-4444-8444-00000000000d','NST.FR.2','11111111-1111-4111-8111-000000000001');
+  v_route := t.p5_run('44444444-4444-4444-8444-00000000000d','NST.FR.1',
+                      '11111111-1111-4111-8111-000000000001',
+                      array['not_demonstrated','not_demonstrated','not_demonstrated','not_demonstrated']);
+  perform t.assert_eq(
+    (select count(*)::int from public.diagnostic_session_items where reason_code='prerequisite_probe'),
+    1, '7E. a probe that does not go well does not produce a second, deeper probe');
+  perform t.assert(v_route like '%[stop=frustration_floor]', '7E2. the branch ends there');
+  perform t.assert_eq(
+    (select ss.skill_state::text from public.student_skills ss
+      where ss.student_id='44444444-4444-4444-8444-00000000000d'
+        and ss.skill_id=(select id from public.skills where code='NST.FR.2')),
+    'developing', '7E3. and the probed skill keeps the state it had');
+end $$;
+rollback;
+
+-- F. nothing is eligible, because the floored skill has no prerequisites at all
+begin;
+do $$
+declare v_route text;
+begin
+  perform t.logout();
+  v_route := t.p5_run('44444444-4444-4444-8444-00000000000d','NST.FR.1',
+                      '11111111-1111-4111-8111-000000000001',
+                      array['not_demonstrated','not_demonstrated']);
+  perform t.assert_eq(
+    (select count(*)::int from public.diagnostic_session_items where reason_code='prerequisite_probe'),
+    0, '7F. a skill with no prerequisites offers nothing to probe');
+  perform t.assert(v_route like '%[stop=frustration_floor]', '7F2. so the branch ends immediately');
+  perform t.assert_eq(
+    (select count(*)::int from public.diagnostic_session_items), 2,
+    '7F3. after exactly the two items that reached the floor');
+end $$;
+rollback;
+
+-- =============================================================================
 -- 8, 9, 24. Skip and not-today are not failures
 -- =============================================================================
 

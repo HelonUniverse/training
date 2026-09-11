@@ -1,7 +1,6 @@
 # STEP 7 phase 5 — the adaptive diagnostic
 
-Migrations 0092–0095. **Local only; not deployed to managed**, pending one
-decision (last section).
+Migrations 0092–0095.
 
 ## What it answers
 
@@ -82,23 +81,28 @@ Everything `SECURITY INVOKER`; **no new definer function**. Starting needs
 view-only guardian may watch a session and may not stop it, and another family
 cannot see that a session exists.
 
-## The decision I had to make, and want ratified
+## The prerequisite probe — approved 2026-09-11
 
-**What makes a prerequisite probe *useful*.**
+After the floor, at most **one** probe, targeting a **direct** prerequisite of
+the floored skill that:
 
-§6 says the floor may spend at most one prerequisite probe. The literal reading —
-probe an *unestablished* prerequisite — turns out to be unreachable: the frontier
-rule guarantees every in-branch prerequisite was already established before the
-floored skill was ever presented. The first smoke run produced no probe at all,
-which is how this surfaced.
+- was **not observed during this session** — a prerequisite she demonstrated
+  twenty minutes ago is not re-asked, because that is the repetition the floor
+  exists to prevent; and
+- is **not human-confirmed secure** — a parent's standing judgement is not
+  re-opened because the next skill up went badly.
 
-So the probe now targets a prerequisite Nestra is taking **on trust**:
-established by the stored profile, but not observed in this session. One item, to
-ask whether the foundation still holds. A prerequisite the child demonstrated
-twenty minutes ago is not re-asked — asking it would be the repeated exposure to
-failure the rule exists to prevent.
+Ties between equally-near prerequisites break on skill code. Nothing eligible
+means no probe at all and the branch simply ends. Direct only, so there is no
+recursive descent, and the probe's own outcome cannot trigger a second one. The
+result creates an observation and does exactly nothing else — it lowers no state.
 
-This is a decision about how prerequisites are traversed, which §24 names as a
-stop condition. It is narrow and reversible — one predicate — but it is a product
-semantic, so it is here rather than buried in a function, and managed is waiting
-on it.
+Seven tests (7A–7G) cover each arm: established-and-unseen, demonstrated this
+session, human-confirmed secure, two eligible prerequisites, a probe that itself
+goes badly, a floored skill with no prerequisites, and a confirmed `secure` that
+stays exactly where the parent left it.
+
+This replaces the unreachable rule the first build shipped with: the frontier
+guarantees every in-branch prerequisite is already established, so "probe an
+unestablished prerequisite" could never fire, and the first smoke run produced no
+probe at all.

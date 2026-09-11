@@ -266,6 +266,7 @@ begin
     from pg_catalog.pg_proc p join pg_catalog.pg_namespace n on n.oid = p.pronamespace
    where n.nspname in ('app', 'public')
      and p.proname in ('diagnostic_branch', 'diagnostic_established',
+                       'diagnostic_human_confirmed_secure',
                        'diagnostic_session_state', 'diagnostic_next',
                        'diagnostic_present', 'diagnostic_finish',
                        'start_diagnostic_session', 'record_diagnostic_observation',
@@ -282,6 +283,7 @@ begin
     from pg_catalog.pg_proc p join pg_catalog.pg_namespace n on n.oid = p.pronamespace
    where n.nspname in ('app', 'public')
      and p.proname in ('diagnostic_branch', 'diagnostic_established',
+                       'diagnostic_human_confirmed_secure',
                        'diagnostic_session_state', 'diagnostic_next',
                        'diagnostic_present', 'diagnostic_finish',
                        'start_diagnostic_session', 'record_diagnostic_observation',
@@ -300,6 +302,7 @@ begin
     from pg_catalog.pg_proc p join pg_catalog.pg_namespace n on n.oid = p.pronamespace
    where n.nspname in ('app', 'public')
      and p.proname in ('diagnostic_branch', 'diagnostic_established',
+                       'diagnostic_human_confirmed_secure',
                        'diagnostic_session_state', 'diagnostic_next',
                        'diagnostic_present', 'diagnostic_finish',
                        'start_diagnostic_session', 'record_diagnostic_observation',

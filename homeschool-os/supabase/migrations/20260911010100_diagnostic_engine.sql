@@ -27,9 +27,21 @@
 --
 -- THE FRUSTRATION FLOOR. Two consecutive `not_demonstrated` observations ANYWHERE
 -- in the branch, and the branch stops escalating. At most ONE prerequisite probe
--- follows - the nearest unestablished prerequisite of the skill that floored -
--- and then the session ends. There is no downward staircase. A child is not
--- walked backwards through five skills to find a floor.
+-- follows, and then the session ends. There is no downward staircase: a child is
+-- not walked backwards through five skills to find a floor.
+--
+-- The probe targets a DIRECT prerequisite of the floored skill that was not
+-- observed in this session and is not human-confirmed secure. Direct only, so
+-- there is no recursive descent. Unseen, because re-asking something she just
+-- demonstrated is the repetition this rule exists to prevent. Not
+-- human-confirmed secure, because a parent's standing judgement is not re-opened
+-- by difficulty further up. Ties between equally-near prerequisites break on
+-- skill code. If nothing qualifies there is no probe at all and the branch
+-- simply ends.
+--
+-- The probe's own result creates an observation, may explain the boundary, and
+-- does exactly nothing else: it lowers no state, and it cannot trigger a second
+-- probe.
 --
 -- SKIPPED AND NOT TODAY ARE NOT FAILURES. They do not touch the consecutive
 -- counter, they cannot reach the floor, and they leave the profile alone. A
@@ -82,6 +94,22 @@ returns boolean language sql stable security invoker set search_path = '' as $fn
                      and ss.evidence_sufficiency >= 'supported'
                      from public.student_skills ss
                     where ss.student_id = p_student and ss.skill_id = p_skill), false);
+$fn$;
+
+-- --- a state a person put there, and that a probe may not disturb --------------
+-- An active human confirmation of `secure` is not a hypothesis the diagnostic
+-- gets to re-open because something downstream went badly. A parent said her
+-- daughter is solid on this; a hard afternoon with the next skill up is not
+-- evidence against that, and asking again would imply it was.
+
+create or replace function app.diagnostic_human_confirmed_secure(p_student uuid, p_skill uuid)
+returns boolean language sql stable security invoker set search_path = '' as $fn$
+  select exists (
+    select 1 from public.student_skills ss
+      join public.student_skill_overrides o on o.id = ss.active_override_id
+     where ss.student_id = p_student and ss.skill_id = p_skill
+       and ss.skill_state = 'secure' and o.status = 'active'
+       and o.decided_state = 'secure' and o.decided_by is not null);
 $fn$;
 
 -- --- what this session has seen so far ----------------------------------------
@@ -170,27 +198,30 @@ begin
     if (v_state->>'prerequisite_probe_spent')::boolean then
       return jsonb_build_object('done', true, 'stop_reason', 'frustration_floor');
     end if;
+    -- DIRECT prerequisites of the floored skill only. Every one of them is
+    -- equally near, so the stable skill code decides between them - never a
+    -- benchmark, a grade, an age or a number about the child.
     for r in
-      select b.skill_id, b.depth, b.code
-        from app.diagnostic_branch(v_s.branch_root_skill_id) b
-       where b.skill_id in (select sp.prerequisite_skill_id
-                              from public.skill_prerequisites sp
-                             where sp.skill_id = (v_state->>'last_skill_id')::uuid)
-       order by b.depth desc, b.code
+      select k.id as skill_id, k.code
+        from public.skill_prerequisites sp
+        join public.skills k on k.id = sp.prerequisite_skill_id
+       where sp.skill_id = (v_state->>'last_skill_id')::uuid
+         and k.active
+       order by k.code
     loop
-      -- A USEFUL probe, which is a narrower thing than an unestablished one.
-      -- The frontier rule guarantees every in-branch prerequisite was already
-      -- established before the floored skill was ever presented, so "probe an
-      -- unestablished prerequisite" can never fire - the first smoke run proved
-      -- that by producing no probe at all.
+      -- TWO CONDITIONS, and a skill must clear both.
       --
-      -- What is worth checking after a hard afternoon is a prerequisite Nestra
-      -- is taking on TRUST: established by the stored profile, but not seen
-      -- today. One item, to ask whether the foundation still holds. A
-      -- prerequisite the child demonstrated twenty minutes ago is not worth
-      -- re-asking, and asking it anyway would be the repeated exposure to
-      -- failure this rule exists to prevent.
-      if coalesce(((v_per -> r.skill_id::text)->>'answered')::int, 0) = 0 then
+      -- Not seen this session: a prerequisite the child demonstrated twenty
+      -- minutes ago is not re-asked, because asking it again would be the
+      -- repeated exposure to failure this whole rule exists to prevent.
+      --
+      -- Not human-confirmed secure: a parent's standing judgement is not
+      -- re-opened because the next skill up went badly.
+      --
+      -- What is left is exactly what is worth one question - a prerequisite
+      -- Nestra is taking on trust from the stored profile, unseen today.
+      if coalesce(((v_per -> r.skill_id::text)->>'answered')::int, 0) = 0
+         and not app.diagnostic_human_confirmed_secure(v_s.student_id, r.skill_id) then
         select i.id into v_item from public.diagnostic_items i
          where i.skill_id = r.skill_id and i.active
            and not exists (select 1 from public.diagnostic_session_items si
@@ -557,6 +588,7 @@ end $fn$;
 revoke all on function app.diagnostic_rule_version() from public, anon;
 revoke all on function app.diagnostic_branch(uuid) from public, anon;
 revoke all on function app.diagnostic_established(uuid, uuid) from public, anon;
+revoke all on function app.diagnostic_human_confirmed_secure(uuid, uuid) from public, anon;
 revoke all on function app.diagnostic_session_state(uuid) from public, anon;
 revoke all on function app.diagnostic_next(uuid) from public, anon;
 revoke all on function app.diagnostic_present(uuid, jsonb) from public, anon;
@@ -564,6 +596,7 @@ revoke all on function app.diagnostic_finish(uuid, app.diagnostic_stop_reason, a
 grant execute on function app.diagnostic_rule_version() to authenticated, service_role;
 grant execute on function app.diagnostic_branch(uuid) to authenticated, service_role;
 grant execute on function app.diagnostic_established(uuid, uuid) to authenticated, service_role;
+grant execute on function app.diagnostic_human_confirmed_secure(uuid, uuid) to authenticated, service_role;
 grant execute on function app.diagnostic_session_state(uuid) to authenticated, service_role;
 grant execute on function app.diagnostic_next(uuid) to authenticated, service_role;
 grant execute on function app.diagnostic_present(uuid, jsonb) to authenticated, service_role;
