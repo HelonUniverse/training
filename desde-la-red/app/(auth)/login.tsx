@@ -262,6 +262,10 @@ function Field({
   editable = true,
   keyboardType = 'default',
 }: FieldProps) {
+  // Escribir una contraseña a ciegas en un teléfono es la primera causa de
+  // "no me deja entrar". El ojo la enseña mientras se toca.
+  const [visible, setVisible] = useState(false);
+
   return (
     <View style={styles.field}>
       <Text style={styles.fieldLabel}>{label}</Text>
@@ -272,15 +276,31 @@ function Field({
           onChangeText={onChangeText}
           placeholder={placeholder}
           placeholderTextColor={colors.textMuted}
-          secureTextEntry={secure}
+          secureTextEntry={secure && !visible}
           keyboardType={keyboardType}
           editable={editable}
           textContentType={secure ? 'password' : keyboardType === 'email-address' ? 'emailAddress' : 'name'}
-          autoCapitalize={keyboardType === 'email-address' ? 'none' : 'words'}
+          autoCapitalize={keyboardType === 'email-address' || secure ? 'none' : 'words'}
           autoCorrect={false}
           style={styles.fieldInput}
           accessibilityLabel={label}
         />
+        {secure ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={visible ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+            accessibilityState={{ selected: visible }}
+            onPress={() => setVisible((v) => !v)}
+            hitSlop={10}
+            style={({ pressed }) => pressed && { opacity: 0.6 }}
+          >
+            <Feather
+              name={visible ? 'eye-off' : 'eye'}
+              size={16}
+              color={visible ? colors.cyan : colors.textMuted}
+            />
+          </Pressable>
+        ) : null}
       </View>
     </View>
   );

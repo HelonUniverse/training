@@ -163,6 +163,9 @@ function Field({
   placeholder: string;
   editable?: boolean;
 }) {
+  // Aquí hay que escribirla dos veces iguales: poder verla importa todavía más.
+  const [visible, setVisible] = useState(false);
+
   return (
     <View style={styles.field}>
       <Text style={styles.fieldLabel}>{label}</Text>
@@ -173,7 +176,7 @@ function Field({
           onChangeText={onChangeText}
           placeholder={placeholder}
           placeholderTextColor={colors.textMuted}
-          secureTextEntry
+          secureTextEntry={!visible}
           editable={editable}
           textContentType="newPassword"
           autoCapitalize="none"
@@ -181,6 +184,20 @@ function Field({
           style={styles.fieldInput}
           accessibilityLabel={label}
         />
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={visible ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+          accessibilityState={{ selected: visible }}
+          onPress={() => setVisible((v) => !v)}
+          hitSlop={10}
+          style={({ pressed }) => pressed && { opacity: 0.6 }}
+        >
+          <Feather
+            name={visible ? 'eye-off' : 'eye'}
+            size={16}
+            color={visible ? colors.cyan : colors.textMuted}
+          />
+        </Pressable>
       </View>
     </View>
   );
