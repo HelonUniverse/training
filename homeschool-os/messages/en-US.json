@@ -1144,6 +1144,18 @@
       "awaitingConfirmation": "{count} waiting for review",
       "blockedByAvailability": "{count} you can't open right now",
       "blockedByInactiveHome": "{count} in a course that's no longer active"
+    },
+    "pickBackUp": "Pick this back up",
+    "pickBackUpNote": "Days go differently than planned. Picking something back up is ordinary, and nothing was counted against anyone.",
+    "supportingResource": "Along with",
+    "supportingResourceNote": "Your activity, with something from your library alongside it. It's still yours.",
+    "refusal": {
+      "aCompletedActivityIsNotUndone": "You already did this one. If you'd like to do it again, add it as a new activity — that way the first time stays on the record.",
+      "aReplacedActivityStaysReplaced": "You swapped this one out earlier.",
+      "anArchivedActivityStaysArchived": "This one is put away.",
+      "notAStepThisActivityCanTakeFromHere": "That isn't a step this one can take from where it is.",
+      "anotherActivityIsAlreadyLiveOnThisStep": "There's already something chosen for this step. Set that one down first if you'd rather come back to this.",
+      "reopeningMeansSelectedAvailableOrStarted": "Picking something back up means choosing it again or starting it."
     }
   }
 }

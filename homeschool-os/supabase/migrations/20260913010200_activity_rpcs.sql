@@ -138,12 +138,13 @@ begin
   insert into public.learning_activities (
       student_id, family_id, organization_id, skill_id, path_id, path_node_id,
       resource_id, provider_id, activity_kind, modality, language, title,
-      estimated_minutes, status, origin, record_provenance,
+      estimated_minutes, status, origin, record_provenance, resource_snapshot,
       selection_reasons, selection_context, rule_version)
   values (
       v_node.student_id, v_family, v_org, v_node.skill_id, v_node.path_id, p_node,
       v_r.id, v_r.provider_id, v_r.activity_kind, v_r.modality, v_r.language, v_r.title,
       v_r.estimated_minutes, 'selected', 'deterministic_system_selection', 'system_computed',
+      app.learning_activity_resource_snapshot(v_r.id),
       coalesce(v_reasons, '{}'), v_res, app.learning_activity_rule_version())
   returning id into v_id;
 
@@ -213,11 +214,12 @@ begin
       student_id, family_id, organization_id, skill_id, path_id, path_node_id,
       resource_id, provider_id, activity_kind, modality, language, title,
       estimated_minutes, status, origin, record_provenance, selected_by,
-      selection_context)
+      resource_snapshot, selection_context)
   values (p_student, v_family, v_org, p_skill, v_path, p_node,
           v_r.id, v_r.provider_id, v_r.activity_kind, v_r.modality, v_r.language,
           v_r.title, v_r.estimated_minutes, 'selected', 'human_selected',
           'human_entered', auth.uid(),
+          app.learning_activity_resource_snapshot(v_r.id),
           jsonb_build_object('chosen_by_a_person', true, 'note', p_note))
   returning id into v_id;
 
@@ -248,9 +250,11 @@ create or replace function public.create_custom_activity(
   p_parent_instructions text default null,
   p_child_instructions  text default null,
   p_minutes  integer default null,
-  p_node     uuid default null)
+  p_node     uuid default null,
+  p_resource uuid default null)
 returns jsonb language plpgsql security invoker set search_path = '' as $fn$
 declare v_id uuid; v_family uuid; v_org uuid; v_path uuid;
+        v_r public.learning_resources;
 begin
   if auth.uid() is null then
     raise exception 'not authenticated' using errcode = 'insufficient_privilege';
@@ -269,36 +273,57 @@ begin
     end if;
   end if;
 
+  -- OPTIONAL, AND IT DOES NOT CHANGE WHOSE IDEA THIS IS. "Practise with the
+  -- measuring cups, then watch this video" is one activity a person composed,
+  -- and it stays `human_created` with the video attached. Flipping it to
+  -- `human_selected` because a resource_id appeared would credit the catalogue
+  -- with a sentence she wrote.
+  if p_resource is not null then
+    select * into v_r from public.learning_resources r where r.id = p_resource;
+    if not found then
+      raise exception 'no such resource' using errcode = 'insufficient_privilege';
+    end if;
+  end if;
+
   select st.family_id, st.primary_organization_id into v_family, v_org
     from public.students st where st.id = p_student;
 
   insert into public.learning_activities (
       student_id, family_id, organization_id, skill_id, path_id, path_node_id,
-      resource_id, activity_kind, modality, language, title,
+      resource_id, provider_id, activity_kind, modality, language, title,
       parent_instructions, child_instructions, estimated_minutes,
-      status, origin, record_provenance, created_by, selection_context)
+      status, origin, record_provenance, created_by,
+      resource_snapshot, selection_context)
   values (p_student, v_family, v_org, p_skill, v_path, p_node,
-          null, p_kind, coalesce(p_modality, 'unspecified'),
+          v_r.id, v_r.provider_id,
+          coalesce(p_kind, v_r.activity_kind),
+          coalesce(p_modality, 'unspecified'),
           coalesce(p_language, 'unknown'), btrim(p_title),
           p_parent_instructions, p_child_instructions, p_minutes,
           'selected', 'human_created', 'human_entered', auth.uid(),
-          jsonb_build_object('made_by_a_person', true))
+          app.learning_activity_resource_snapshot(p_resource),
+          jsonb_build_object('made_by_a_person', true,
+                             'supporting_resource', p_resource))
   returning id into v_id;
 
   insert into public.learning_activity_events (
-      activity_id, student_id, kind, skill_id, note, actor)
-  values (v_id, p_student, 'created', p_skill, p_parent_instructions, auth.uid());
+      activity_id, student_id, kind, skill_id, to_resource_id, note, actor)
+  values (v_id, p_student, 'created', p_skill, p_resource, p_parent_instructions, auth.uid());
 
   return jsonb_build_object(
-    'activity_id', v_id, 'origin', 'human_created', 'resource_available', false,
+    'activity_id', v_id, 'origin', 'human_created',
+    'resource_available', p_resource is not null,
+    'supporting_resource', p_resource,
     'skill_id', p_skill, 'evidence_created', false, 'skill_state_changed', false,
     'note', 'Your own activity, recorded as yours. Describing what you are going '
             || 'to do is not a statement about what your child can do.');
 end $fn$;
 
-comment on function public.create_custom_activity(uuid, uuid, text, app.learning_activity_kind, app.learning_activity_modality, app.learning_resource_language, text, text, integer, uuid) is
-  'A family''s own activity for a skill, with no catalogue resource at all. A '
-  'first-class activity, not a degraded one - and never automatically evidence.';
+comment on function public.create_custom_activity(uuid, uuid, text, app.learning_activity_kind, app.learning_activity_modality, app.learning_resource_language, text, text, integer, uuid, uuid) is
+  'A family''s own activity for a skill, with a supporting catalogue resource or '
+  'with nothing at all. A first-class activity either way, never a degraded '
+  'one - and never automatically evidence. Attaching a video does not make the '
+  'catalogue the author.';
 
 -- =============================================================================
 -- Replacement
@@ -326,8 +351,19 @@ begin
   if not found or not app.can_student_action(v_old.student_id, 'learning_plan', 'update') then
     raise exception 'not permitted' using errcode = 'insufficient_privilege';
   end if;
-  if v_old.status in ('replaced', 'archived') then
-    raise exception 'this activity has already been set aside' using errcode = 'check_violation';
+  -- The graph decides, and it refuses structurally rather than with an opaque
+  -- error: a completed morning is not swapped out after the fact, because that
+  -- would remove something that happened from the record.
+  if not app.learning_activity_transition_allowed(v_old.status, 'replaced') then
+    return jsonb_build_object(
+      'replaced', false,
+      'activity_id', p_activity,
+      'from', v_old.status,
+      'to', 'replaced',
+      'reason', app.learning_activity_transition_refusal(v_old.status, 'replaced'),
+      'allowed_next', to_jsonb(app.learning_activity_next_states(v_old.status)),
+      'note', 'This one is already part of the record. If you want to do '
+              || 'something different, add it as its own activity.');
   end if;
   if p_resource is null and coalesce(btrim(p_title), '') = '' then
     raise exception 'replacing needs either a resource or a name for what you are doing instead'
@@ -353,7 +389,7 @@ begin
       skill_id,                      -- UNCHANGED. The target does not move.
       path_id, path_node_id,
       resource_id, provider_id, activity_kind, modality, language, title,
-      estimated_minutes, status, origin, record_provenance,
+      estimated_minutes, status, origin, record_provenance, resource_snapshot,
       selected_by, created_by, replaces_activity_id, selection_context)
   values (
       v_old.student_id, v_old.family_id, v_old.organization_id,
@@ -368,6 +404,7 @@ begin
       (case when p_resource is null then 'human_created'
             else 'human_selected' end)::app.learning_activity_origin,
       'human_entered',
+      app.learning_activity_resource_snapshot(p_resource),
       case when p_resource is null then null else auth.uid() end,
       auth.uid(), p_activity,
       jsonb_build_object('replaces', p_activity, 'chosen_by_a_person', true,
@@ -403,9 +440,9 @@ comment on function public.replace_activity_resource(uuid, uuid, text, text) is
 -- =============================================================================
 -- What happened
 -- =============================================================================
--- Four transitions, one shape. Each records a fact about a morning and returns
--- the same two false flags, because the temptation to read meaning into them is
--- exactly what this layer exists to refuse.
+-- Each transition records a fact about a morning and returns the same false
+-- flags, because the temptation to read meaning into them is exactly what this
+-- layer exists to refuse.
 
 create or replace function app.learning_activity_transition(
   p_activity uuid, p_status app.learning_activity_status,
@@ -419,6 +456,45 @@ begin
   select * into v from public.learning_activities a where a.id = p_activity;
   if not found or not app.can_student_action(v.student_id, 'learning_plan', 'update') then
     raise exception 'not permitted' using errcode = 'insufficient_privilege';
+  end if;
+
+  -- HISTORY IS NOT REWRITTEN. A morning that was put off can be picked back up;
+  -- a morning that happened cannot be un-happened. The refusal is structured so
+  -- a screen can say "that already happened - add another go instead" rather
+  -- than showing a constraint name.
+  if not app.learning_activity_transition_allowed(v.status, p_status) then
+    return jsonb_build_object(
+      'moved', false,
+      'activity_id', p_activity,
+      'from', v.status,
+      'to', p_status,
+      'reason', app.learning_activity_transition_refusal(v.status, p_status),
+      'allowed_next', to_jsonb(app.learning_activity_next_states(v.status)),
+      'evidence_created', false,
+      'skill_state_changed', false,
+      'note', 'Nothing changed. Doing something again is a new activity, so '
+              || 'that what already happened stays on the record.');
+  end if;
+
+  -- Picking something back up needs the step to be free. Two live activities on
+  -- one step is the thing the index refuses, and telling her why beats handing
+  -- her a unique-violation.
+  if p_status in ('selected', 'available', 'started')
+     and v.status in ('skipped', 'not_today')
+     and v.path_node_id is not null
+     and exists (select 1 from public.learning_activities o
+                  where o.path_node_id = v.path_node_id and o.id <> v.id
+                    and o.status in ('proposed','selected','available','started')) then
+    return jsonb_build_object(
+      'moved', false,
+      'activity_id', p_activity,
+      'from', v.status,
+      'to', p_status,
+      'reason', 'another_activity_is_already_live_on_this_step',
+      'evidence_created', false,
+      'skill_state_changed', false,
+      'note', 'There is already something chosen for this step. Set that one '
+              || 'down first if you would rather come back to this.');
   end if;
 
   update public.learning_activities a
@@ -438,8 +514,10 @@ begin
   values (p_activity, v.student_id, p_kind, v.skill_id, v.resource_id, p_note, auth.uid());
 
   return jsonb_build_object(
+    'moved', true,
     'activity_id', p_activity,
     'status', p_status,
+    'from', v.status,
     'skill_id', v.skill_id,
     'evidence_created', false,
     'skill_state_changed', false,
@@ -472,6 +550,33 @@ create or replace function public.archive_activity(p_activity uuid, p_note text 
 returns jsonb language sql security invoker set search_path = '' as $fn$
   select app.learning_activity_transition(p_activity, 'archived', 'archived', p_note);
 $fn$;
+
+-- Thursday. A week that went sideways on Tuesday and came back two days later
+-- is an ordinary week, and a lifecycle that made her create a second row to say
+-- so would be teaching her to work around the product. Skipped and not_today
+-- reopen; completed does not, and that asymmetry is the whole graph.
+create or replace function public.reopen_activity(
+  p_activity uuid,
+  p_status app.learning_activity_status default 'selected',
+  p_note text default null)
+returns jsonb language plpgsql security invoker set search_path = '' as $fn$
+begin
+  if p_status not in ('selected', 'available', 'started') then
+    return jsonb_build_object(
+      'moved', false, 'activity_id', p_activity, 'to', p_status,
+      'reason', 'reopening_means_selected_available_or_started',
+      'evidence_created', false, 'skill_state_changed', false);
+  end if;
+  return app.learning_activity_transition(
+    p_activity, p_status,
+    (case when p_status = 'started' then 'started' else 'selected' end)::app.learning_activity_event_kind,
+    p_note);
+end $fn$;
+
+comment on function public.reopen_activity(uuid, app.learning_activity_status, text) is
+  'Picks a skipped or put-off activity back up. A completed one is never '
+  'reopened: doing something again is a new activity with lineage, so that what '
+  'already happened stays on the record.';
 
 comment on function public.complete_activity(uuid, text) is
   'Records that the activity was completed. Says nothing whatever about the '
@@ -519,6 +624,7 @@ begin
     'chosen_by_a_person', v.origin in ('human_selected', 'human_created'),
     'reasons', to_jsonb(v.selection_reasons),
     'selection_context', v.selection_context,
+    'resource_snapshot', v.resource_snapshot,
     'rule_version', v.rule_version,
     'modality', v.modality,
     'language', v.language,
@@ -539,26 +645,28 @@ revoke all on function app.learning_activity_note(text) from public, anon;
 revoke all on function app.learning_activity_transition(uuid, app.learning_activity_status, app.learning_activity_event_kind, text) from public, anon;
 revoke all on function public.select_activity_for_node(uuid, app.learning_resource_language, app.learning_activity_modality) from public, anon;
 revoke all on function public.choose_activity_resource(uuid, uuid, uuid, uuid, text) from public, anon;
-revoke all on function public.create_custom_activity(uuid, uuid, text, app.learning_activity_kind, app.learning_activity_modality, app.learning_resource_language, text, text, integer, uuid) from public, anon;
+revoke all on function public.create_custom_activity(uuid, uuid, text, app.learning_activity_kind, app.learning_activity_modality, app.learning_resource_language, text, text, integer, uuid, uuid) from public, anon;
 revoke all on function public.replace_activity_resource(uuid, uuid, text, text) from public, anon;
 revoke all on function public.start_activity(uuid, text) from public, anon;
 revoke all on function public.complete_activity(uuid, text) from public, anon;
 revoke all on function public.skip_activity(uuid, text) from public, anon;
 revoke all on function public.not_today_activity(uuid, text) from public, anon;
 revoke all on function public.archive_activity(uuid, text) from public, anon;
+revoke all on function public.reopen_activity(uuid, app.learning_activity_status, text) from public, anon;
 revoke all on function public.explain_activity(uuid) from public, anon;
 
 grant execute on function app.learning_activity_note(text) to authenticated, service_role;
 grant execute on function app.learning_activity_transition(uuid, app.learning_activity_status, app.learning_activity_event_kind, text) to authenticated, service_role;
 grant execute on function public.select_activity_for_node(uuid, app.learning_resource_language, app.learning_activity_modality) to authenticated, service_role;
 grant execute on function public.choose_activity_resource(uuid, uuid, uuid, uuid, text) to authenticated, service_role;
-grant execute on function public.create_custom_activity(uuid, uuid, text, app.learning_activity_kind, app.learning_activity_modality, app.learning_resource_language, text, text, integer, uuid) to authenticated, service_role;
+grant execute on function public.create_custom_activity(uuid, uuid, text, app.learning_activity_kind, app.learning_activity_modality, app.learning_resource_language, text, text, integer, uuid, uuid) to authenticated, service_role;
 grant execute on function public.replace_activity_resource(uuid, uuid, text, text) to authenticated, service_role;
 grant execute on function public.start_activity(uuid, text) to authenticated, service_role;
 grant execute on function public.complete_activity(uuid, text) to authenticated, service_role;
 grant execute on function public.skip_activity(uuid, text) to authenticated, service_role;
 grant execute on function public.not_today_activity(uuid, text) to authenticated, service_role;
 grant execute on function public.archive_activity(uuid, text) to authenticated, service_role;
+grant execute on function public.reopen_activity(uuid, app.learning_activity_status, text) to authenticated, service_role;
 grant execute on function public.explain_activity(uuid) to authenticated, service_role;
 
 select app.assert_schema_invariants();

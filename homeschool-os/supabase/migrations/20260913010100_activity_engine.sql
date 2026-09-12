@@ -262,12 +262,122 @@ comment on function app.learning_activity_revisit_is_invited(uuid, uuid, uuid) i
   'confirmed. An explicit revisit, a parent goal or a node she added herself is '
   'an invitation; the mere existence of material is not.';
 
+-- --- what the material was, at the moment it was attached ---------------------
+-- A provider can retitle a lesson, let a subscription lapse, or withdraw
+-- content entirely. None of that may make "why was my daughter doing this in
+-- March" unanswerable, so the answer is frozen when the activity is made rather
+-- than reconstructed later from a row that has moved on.
+
+create or replace function app.learning_activity_resource_snapshot(p_resource uuid)
+returns jsonb language sql stable security invoker set search_path = '' as $fn$
+  select case when p_resource is null then '{}'::jsonb else
+    coalesce((select jsonb_build_object(
+      'resource_id',       r.id,
+      'title',             r.title,
+      'kind',              r.kind,
+      'activity_kind',     r.activity_kind,
+      'modality',          r.modality,
+      'language',          r.language,
+      'availability',      r.availability,
+      'content_ownership', r.content_ownership,
+      'integration_mode',  r.integration_mode,
+      'license_note',      r.license_note,
+      'is_demo',           r.is_demo,
+      'external_url',      r.external_url,
+      'provider_id',       r.provider_id,
+      'provider_name',     pr.name,
+      'provider_is_first_party', pr.is_first_party,
+      'course_id',         r.course_id,
+      'captured_at',       now())
+      from public.learning_resources r
+      left join public.curriculum_providers pr on pr.id = r.provider_id
+     where r.id = p_resource), '{}'::jsonb) end;
+$fn$;
+
+comment on function app.learning_activity_resource_snapshot(uuid) is
+  'The material as it was when it was attached, frozen. The live row is still '
+  'joined for anything current; this is the historical account, and it is the '
+  'only one that survives a provider renaming or withdrawing its content.';
+
+-- =============================================================================
+-- The lifecycle graph
+-- =============================================================================
+-- Flexible where a homeschool week is flexible, and firm where the record has
+-- to stay true. A morning that was put off can be picked back up; a morning
+-- that happened cannot be un-happened.
+--
+--   proposed   -> selected available skipped not_today replaced archived
+--   selected   -> available started skipped not_today replaced archived
+--   available  -> selected started skipped not_today replaced archived
+--   started    -> completed skipped not_today replaced archived
+--   not_today  -> selected available started replaced archived
+--   skipped    -> selected available started replaced archived
+--   completed  -> archived
+--   replaced   -> (nothing)
+--   archived   -> (nothing)
+--
+-- `completed` is terminal but for archiving, and that is the whole point of
+-- having a graph at all. "Do it again" is a NEW activity with lineage, not an
+-- edit that quietly removes a morning from the record. A family that can
+-- rewrite what already happened does not have a record; it has a draft.
+--
+-- `skipped` and `not_today` reopen freely, because they are not verdicts. A
+-- week that went sideways on Tuesday and came back on Thursday is an ordinary
+-- week, and a lifecycle that made her create a second row to say so would be
+-- teaching her to work around it.
+
+create or replace function app.learning_activity_next_states(
+  p_from app.learning_activity_status)
+returns app.learning_activity_status[] language sql immutable set search_path = '' as $fn$
+  select (case p_from
+    when 'proposed'  then array['selected','available','skipped','not_today','replaced','archived']
+    when 'selected'  then array['available','started','skipped','not_today','replaced','archived']
+    when 'available' then array['selected','started','skipped','not_today','replaced','archived']
+    when 'started'   then array['completed','skipped','not_today','replaced','archived']
+    when 'not_today' then array['selected','available','started','replaced','archived']
+    when 'skipped'   then array['selected','available','started','replaced','archived']
+    when 'completed' then array['archived']
+    else array[]::text[]
+  end)::app.learning_activity_status[];
+$fn$;
+
+create or replace function app.learning_activity_transition_allowed(
+  p_from app.learning_activity_status, p_to app.learning_activity_status)
+returns boolean language sql immutable set search_path = '' as $fn$
+  select p_from = p_to
+      or p_to = any(app.learning_activity_next_states(p_from));
+$fn$;
+
+-- A stable code rather than a sentence, for the same reason the selection
+-- reasons are codes: a screen renders it in the family's language, and a
+-- refusal a caller cannot branch on is an opaque error with extra steps.
+create or replace function app.learning_activity_transition_refusal(
+  p_from app.learning_activity_status, p_to app.learning_activity_status)
+returns text language sql immutable set search_path = '' as $fn$
+  select case
+    when app.learning_activity_transition_allowed(p_from, p_to) then null
+    when p_from = 'completed' then 'a_completed_activity_is_not_undone'
+    when p_from = 'replaced'  then 'a_replaced_activity_stays_replaced'
+    when p_from = 'archived'  then 'an_archived_activity_stays_archived'
+    else 'not_a_step_this_activity_can_take_from_here'
+  end;
+$fn$;
+
+comment on function app.learning_activity_transition_refusal(app.learning_activity_status, app.learning_activity_status) is
+  'Why a transition is refused, as a code a screen can render. "Do it again" '
+  'after a completion is a new activity with lineage, never an edit that '
+  'removes a morning that happened from the record.';
+
 revoke all on function app.learning_activity_rule_version() from public, anon;
 revoke all on function app.learning_activity_candidates(uuid, uuid, app.learning_resource_language, app.learning_activity_modality) from public, anon;
 revoke all on function app.learning_activity_supply(uuid, uuid) from public, anon;
 revoke all on function app.learning_activity_select_resource(uuid, uuid, app.learning_resource_language, app.learning_activity_modality) from public, anon;
 revoke all on function app.learning_activity_node_is_actionable(uuid) from public, anon;
 revoke all on function app.learning_activity_revisit_is_invited(uuid, uuid, uuid) from public, anon;
+revoke all on function app.learning_activity_resource_snapshot(uuid) from public, anon;
+revoke all on function app.learning_activity_next_states(app.learning_activity_status) from public, anon;
+revoke all on function app.learning_activity_transition_allowed(app.learning_activity_status, app.learning_activity_status) from public, anon;
+revoke all on function app.learning_activity_transition_refusal(app.learning_activity_status, app.learning_activity_status) from public, anon;
 
 grant execute on function app.learning_activity_rule_version() to authenticated, service_role;
 grant execute on function app.learning_activity_candidates(uuid, uuid, app.learning_resource_language, app.learning_activity_modality) to authenticated, service_role;
@@ -275,5 +385,9 @@ grant execute on function app.learning_activity_supply(uuid, uuid) to authentica
 grant execute on function app.learning_activity_select_resource(uuid, uuid, app.learning_resource_language, app.learning_activity_modality) to authenticated, service_role;
 grant execute on function app.learning_activity_node_is_actionable(uuid) to authenticated, service_role;
 grant execute on function app.learning_activity_revisit_is_invited(uuid, uuid, uuid) to authenticated, service_role;
+grant execute on function app.learning_activity_resource_snapshot(uuid) to authenticated, service_role;
+grant execute on function app.learning_activity_next_states(app.learning_activity_status) to authenticated, service_role;
+grant execute on function app.learning_activity_transition_allowed(app.learning_activity_status, app.learning_activity_status) to authenticated, service_role;
+grant execute on function app.learning_activity_transition_refusal(app.learning_activity_status, app.learning_activity_status) to authenticated, service_role;
 
 select app.assert_schema_invariants();

@@ -337,7 +337,7 @@ select t.assert(true, '--- migration regression complete ---');
 -- was never asked about availability, language, ownership or modality.
 
 do $$
-declare r public.learning_resources; v_n int;
+declare r public.learning_resources; v_n int; v_new_availability text;
 begin
   select * into r from public.learning_resources
    where id = '0aaaaaaa-0000-4000-8000-00000000e001';
@@ -381,6 +381,22 @@ begin
    where rs.resource_id = r.id and rs.confirmed;
   if v_n <> 0 then
     raise exception '12i. the migration confirmed a mapping nobody had reviewed';
+  end if;
+
+  -- And the other half of the availability rule: a row written AFTER the
+  -- migration gets `unknown`, because nobody has established anything about it.
+  -- The two defaults are different on purpose - back-filling live rows as
+  -- available preserves what the schema already meant for them, while claiming
+  -- the same thing about every future row would be Nestra asserting access it
+  -- has not checked.
+  insert into public.learning_resources (course_id, kind, title)
+  values ('0aaaaaaa-0000-4000-8000-00000000c001', 'practice', 'Written after 0103')
+  returning availability::text into v_new_availability;
+  if v_new_availability <> 'unknown' then
+    raise exception
+      '12k. a resource created after the migration defaulted to %, not unknown. Legacy rows are '
+      'back-filled as available to preserve their behaviour; new rows must say that nobody has '
+      'established availability', v_new_availability;
   end if;
 
   -- the whole legacy catalogue is eligible-shaped but nothing is eligible,

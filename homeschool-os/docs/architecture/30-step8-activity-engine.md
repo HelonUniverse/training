@@ -40,7 +40,14 @@ filter and a sort.
 
 1. a person has **confirmed** that this material teaches this skill;
 2. it can be opened today (`availability = 'available'`) and its course and
-   provider are still active;
+   provider are still active. Availability has **two different defaults on
+   purpose**: the column was *added* as `available`, which back-fills every row
+   that predates STEP 8 — retroactively inventing a restriction would have
+   silently removed material families are using today — and the default was then
+   changed to `unknown`, which every row written since gets. `unknown` means
+   nobody has established availability. It is **not** unavailable, nothing may
+   present it as though it were, and it is simply not eligible for automatic
+   selection;
 3. if the caller explicitly required a language, it satisfies it — material
    whose language nobody stated does **not** satisfy an explicit requirement,
    because "we don't know" is not Spanish;
@@ -50,7 +57,7 @@ filter and a sort.
 
 | key | |
 |---|---|
-| 1 | material the family is actually enrolled in (`status = 'active'`) |
+| 1 | material the family is actually enrolled in — `status = 'active'`, and *only* active. A course finished, paused or dropped is a fact about last year. Migration 0106a aligns STEP 7's `app.path_resource_for` to the same definition, forward, without touching the deployed 0099; an invariant now refuses either selector preferring an enrolment it does not require to be active |
 | 2 | parent provider preference — **not represented. Skipped, not invented.** |
 | 3 | modality, only when the caller asked for one explicitly |
 | 4 | kind, **as text** |
@@ -83,6 +90,57 @@ between *there is nothing for this skill* and *there are two and the
 subscription lapsed* is the difference between a dead end and a five-minute fix,
 and the family is told which one she is looking at.
 
+## `human_created` may carry a resource
+
+What separates `human_created` from `human_selected` is **who composed the
+activity**, not whether a resource is attached.
+
+* `human_selected` — a person picked a catalogue resource, and *that* is the
+  activity. `la_human_selected_names_its_resource_ck` requires one.
+* `human_created` — a person **authored** it: "practise with the measuring cups,
+  then watch this video". A catalogue resource may support it.
+  `la_authored_activity_is_not_a_selection_ck` requires that such a row carry no
+  rule version and no engine reasons, so attaching a video can never make her
+  sentence look like something an ordering produced.
+
+Every attachment freezes a `resource_snapshot` — title, provider, ownership,
+licence note, availability — so that "why was my daughter doing this in March"
+survives the provider renaming or withdrawing the content.
+
+## The lifecycle is a graph, not a free-for-all
+
+```
+proposed   -> selected available skipped not_today replaced archived
+selected   -> available started skipped not_today replaced archived
+available  -> selected started skipped not_today replaced archived
+started    -> completed skipped not_today replaced archived
+not_today  -> selected available started replaced archived
+skipped    -> selected available started replaced archived
+completed  -> archived
+replaced   -> (nothing)
+archived   -> (nothing)
+```
+
+Flexible where a homeschool week is flexible, firm where the record has to stay
+true. `skipped` and `not_today` reopen freely — a week that went sideways on
+Tuesday and came back on Thursday is an ordinary week, and a lifecycle that made
+her create a second row to say so would teach her to work around the product.
+`completed` does not reopen: doing something again is a **new activity with
+lineage**, never an edit that removes a morning that happened.
+
+Refusals are structured, never an opaque constraint name:
+
+```json
+{"moved": false, "from": "completed", "to": "started",
+ "reason": "a_completed_activity_is_not_undone",
+ "allowed_next": ["archived"], "evidence_created": false}
+```
+
+The RPCs check the graph and hand that back; `la_history_is_not_rewritten`
+enforces the same graph on the row, so a future code path cannot reach the wrong
+place by a different route. All 72 ordered pairs are tested against the matrix
+as written down, not against the function's own opinion of itself.
+
 ## Provenance: five sentences, not one flag
 
 `deterministic_system_selection` · `human_selected` · `human_created` ·
@@ -108,6 +166,8 @@ the fact.
 | the **path** reading availability | invariant (7), G7 |
 | an activity on a goal target, chosen by the system | trigger + invariant (8), G8, N1 |
 | a failure label anywhere in the lifecycle | invariant (9), G9 |
+| history being rewritten (completed → started, and the rest) | invariant (9b) + trigger, D25–D28 |
+| two definitions of "the curriculum this family is using" | invariant (alignment), F7 |
 | a score on an activity | invariant (10), G11 |
 | moving the skill an activity is for | trigger, N2 |
 | rewriting where an activity came from | trigger, N3 |
@@ -143,6 +203,22 @@ titled `Demo:`. And:
   (27).
 * **Grade and age**: Lucas is moved from grade 5 to grade 1, then to grade 12
   with a 2004 birthday. Byte-identical selection (28, 29).
+
+## Managed
+
+Deployed as `step8_activity_resource_schema`, `step8_activity_engine`,
+`step8_activity_rpcs`, `step8_activity_demo_resources`,
+`step8_path_active_enrollment_alignment` and `step8_activity_invariants`.
+
+13 of 14 schema digests match local exactly, including
+`canonical_function_bodies`. Every STEP 7 and STEP 8 function body matches
+byte-for-byte, `app.assert_schema_invariants()` included. The one raw-body
+difference is `public.log_activity`, a STEP 4 function on the documented
+pre-existing comment-drift list in `23-deferred-hygiene.md`.
+
+A 27-line behavioural probe returns line-for-line identical output on both
+databases, and an authenticated RLS probe confirms cross-family isolation under
+real policies. Both roll back completely.
 
 ## What Phase 1 deliberately does not build
 

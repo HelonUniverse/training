@@ -24,9 +24,13 @@
 --   7.  Nor may the PATH read availability - the arrow only goes one way, and a
 --       lapsed subscription may not quietly reorder what a family explores.
 --   8.  A goal target does not automatically become this week's work.
---   9.  The lifecycle is exactly nine labels, and none of them is a failure.
+--   9.  The lifecycle is exactly nine labels, none of them is a failure, and
+--       completed, replaced and archived are endings rather than editable
+--       states.
 --   10. The retired numeric semantics may not appear on the activity tables
 --       either - the sweep now covers all fourteen tables.
+--   11. And there is ONE definition of "the curriculum this family is using".
+--       0106a aligned the path to it; this refuses the drift coming back.
 -- =============================================================================
 
 -- --- what an activity is allowed to change -----------------------------------
@@ -50,6 +54,7 @@ begin
      or new.record_provenance is distinct from old.record_provenance
      or new.selection_reasons is distinct from old.selection_reasons
      or new.selection_context is distinct from old.selection_context
+     or new.resource_snapshot is distinct from old.resource_snapshot
      or new.rule_version      is distinct from old.rule_version then
     raise exception
       'how this activity came to exist, and why, are not editable';
@@ -82,12 +87,38 @@ begin
   return new;
 end $fn$;
 
+-- --- a morning that happened cannot be un-happened ---------------------------
+-- The RPCs already check the graph and hand back a structured refusal, which is
+-- what a screen needs. This is the other half: a direct UPDATE, from a future
+-- code path or a hand-written fix, cannot move a completed activity back to
+-- started, or reopen something that was replaced. A family that can rewrite
+-- what already happened does not have a record; it has a draft.
+
+create or replace function app.forbid_activity_history_rewrite()
+returns trigger language plpgsql security definer set search_path = '' as $fn$
+begin
+  if new.status is distinct from old.status
+     and not app.learning_activity_transition_allowed(old.status, new.status) then
+    raise exception
+      'an activity cannot go from % to %: %', old.status, new.status,
+      app.learning_activity_transition_refusal(old.status, new.status)
+      using errcode = 'check_violation',
+            hint = 'doing something again is a new activity with lineage, not an edit that removes a morning that happened';
+  end if;
+  return new;
+end $fn$;
+
+revoke all on function app.forbid_activity_history_rewrite() from public, anon, authenticated;
 revoke all on function app.forbid_activity_target_rewrite() from public, anon, authenticated;
 revoke all on function app.forbid_goal_target_autoselection() from public, anon, authenticated;
 
 create trigger la_target_is_not_rewritten
   before update on public.learning_activities
   for each row execute function app.forbid_activity_target_rewrite();
+
+create trigger la_history_is_not_rewritten
+  before update on public.learning_activities
+  for each row execute function app.forbid_activity_history_rewrite();
 
 create trigger la_no_goal_target_autoselection
   before insert or update on public.learning_activities
@@ -581,11 +612,16 @@ begin
                        'learning_activity_supply', 'learning_activity_select_resource',
                        'learning_activity_node_is_actionable',
                        'learning_activity_revisit_is_invited',
+                       'learning_activity_resource_snapshot',
+                       'learning_activity_next_states',
+                       'learning_activity_transition_allowed',
+                       'learning_activity_transition_refusal',
                        'learning_activity_note', 'learning_activity_transition',
                        'select_activity_for_node', 'choose_activity_resource',
                        'create_custom_activity', 'replace_activity_resource',
                        'start_activity', 'complete_activity', 'skip_activity',
-                       'not_today_activity', 'archive_activity', 'explain_activity')
+                       'not_today_activity', 'archive_activity', 'reopen_activity',
+                       'explain_activity')
      and p.prosrc ~ '\m(standards|skill_standards|standards_texts|standards_domains|standards_crosswalks|standards_framework_versions|resource_standards)\M';
   if v_bad is not null then
     raise exception
@@ -602,11 +638,16 @@ begin
                        'learning_activity_supply', 'learning_activity_select_resource',
                        'learning_activity_node_is_actionable',
                        'learning_activity_revisit_is_invited',
+                       'learning_activity_resource_snapshot',
+                       'learning_activity_next_states',
+                       'learning_activity_transition_allowed',
+                       'learning_activity_transition_refusal',
                        'learning_activity_note', 'learning_activity_transition',
                        'select_activity_for_node', 'choose_activity_resource',
                        'create_custom_activity', 'replace_activity_resource',
                        'start_activity', 'complete_activity', 'skip_activity',
-                       'not_today_activity', 'archive_activity', 'explain_activity')
+                       'not_today_activity', 'archive_activity', 'reopen_activity',
+                       'explain_activity')
      and p.prosrc ~ '\m(grade_level|grade_equivalent|grade_band|normalized_grade|date_of_birth|birthdate)\M';
   if v_bad is not null then
     raise exception
@@ -623,11 +664,16 @@ begin
                        'learning_activity_supply', 'learning_activity_select_resource',
                        'learning_activity_node_is_actionable',
                        'learning_activity_revisit_is_invited',
+                       'learning_activity_resource_snapshot',
+                       'learning_activity_next_states',
+                       'learning_activity_transition_allowed',
+                       'learning_activity_transition_refusal',
                        'learning_activity_note', 'learning_activity_transition',
                        'select_activity_for_node', 'choose_activity_resource',
                        'create_custom_activity', 'replace_activity_resource',
                        'start_activity', 'complete_activity', 'skip_activity',
-                       'not_today_activity', 'archive_activity', 'explain_activity')
+                       'not_today_activity', 'archive_activity', 'reopen_activity',
+                       'explain_activity')
      and p.prosrc ~* '(insert\s+into|update)\s+(public\.)?(student_skills|student_skill_events|student_skill_overrides|diagnostic_observations)\M';
   if v_bad is not null then
     raise exception
@@ -641,10 +687,11 @@ begin
    where n.nspname in ('app', 'public')
      and p.proname in ('learning_activity_candidates', 'learning_activity_supply',
                        'learning_activity_select_resource', 'learning_activity_transition',
+                       'learning_activity_resource_snapshot',
                        'select_activity_for_node', 'choose_activity_resource',
                        'create_custom_activity', 'replace_activity_resource',
                        'complete_activity', 'skip_activity', 'not_today_activity',
-                       'explain_activity')
+                       'reopen_activity', 'explain_activity')
      and p.prosrc ~ '\m(skill_state|computed_state|effective_state)\M';
   if v_bad is not null then
     raise exception
@@ -692,10 +739,12 @@ begin
    where n.nspname in ('app', 'public')
      and p.proname in ('learning_activity_candidates', 'learning_activity_supply',
                        'learning_activity_select_resource', 'learning_activity_transition',
+                       'learning_activity_resource_snapshot',
                        'select_activity_for_node', 'choose_activity_resource',
                        'create_custom_activity', 'replace_activity_resource',
                        'start_activity', 'complete_activity', 'skip_activity',
-                       'not_today_activity', 'archive_activity', 'explain_activity')
+                       'not_today_activity', 'archive_activity', 'reopen_activity',
+                       'explain_activity')
      and p.prosrc ~* '(insert\s+into|update)\s+(public\.)?(learning_paths|learning_path_nodes|learning_path_events)\M';
   if v_bad is not null then
     raise exception
@@ -725,6 +774,7 @@ begin
   select string_agg(x.want, ', ' order by x.want) into v_bad
     from (values ('public.learning_activities'::regclass, 'la_no_goal_target_autoselection'),
                  ('public.learning_activities'::regclass, 'la_target_is_not_rewritten'),
+                 ('public.learning_activities'::regclass, 'la_history_is_not_rewritten'),
                  ('public.learning_activity_events'::regclass, 'learning_activity_events_append_only'))
          as x(rel, want)
    where not exists (
@@ -740,7 +790,8 @@ begin
   select string_agg(x.want, ', ' order by x.want) into v_bad
     from (values ('la_provenance_matches_origin_ck'),
                  ('la_selection_names_its_actor_ck'),
-                 ('la_human_created_has_no_catalogue_resource_ck'),
+                 ('la_human_selected_names_its_resource_ck'),
+                 ('la_authored_activity_is_not_a_selection_ck'),
                  ('la_lifecycle_is_attributed_ck')) as x(want)
    where not exists (select 1 from pg_catalog.pg_constraint k
                       where k.conname = x.want
@@ -789,6 +840,40 @@ begin
   if v_bad is not null then
     raise exception
       'a skipped morning is not a failure; % must not exist', v_bad;
+  end if;
+
+  -- (9b) and the three endings that must stay endings. A graph that lets
+  -- `completed` go back to `started` is a graph that lets a family delete a
+  -- morning from the record, and the whole reason for having one is that it
+  -- does not.
+  if app.learning_activity_transition_allowed('completed', 'started')
+     or app.learning_activity_transition_allowed('completed', 'not_today')
+     or app.learning_activity_transition_allowed('replaced', 'started')
+     or app.learning_activity_transition_allowed('archived', 'started')
+     or coalesce(array_length(app.learning_activity_next_states('replaced'), 1), 0) <> 0
+     or coalesce(array_length(app.learning_activity_next_states('archived'), 1), 0) <> 0
+     or app.learning_activity_next_states('completed')
+        is distinct from array['archived']::app.learning_activity_status[] then
+    raise exception
+      'the activity lifecycle now allows history to be rewritten. Completed, replaced and archived are endings: doing something again is a new activity with lineage, never an edit to one that already happened';
+  end if;
+
+
+  -- STEP 8 PHASE 1, alignment: one definition of "the curriculum this family is
+  -- using". Both resource selectors prefer material from a course the child is
+  -- enrolled in, and both must mean ACTIVELY enrolled. A course finished in May
+  -- is a fact about last year, and a path that attached material from it while
+  -- the activity engine offered something else would be Nestra giving a family
+  -- two answers to one question.
+  select string_agg(p.proname, ', ' order by p.proname) into v_bad
+    from pg_catalog.pg_proc p join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'app'
+     and p.proname in ('path_resource_for', 'learning_activity_candidates')
+     and p.prosrc ~ '\mstudent_course_enrollments\M'
+     and p.prosrc !~ 'status\s*=\s*''active''';
+  if v_bad is not null then
+    raise exception
+      'a resource selector prefers enrolment without requiring it to be active: %. A course the family finished is not the curriculum they are using, and two functions answering that differently is a defect', v_bad;
   end if;
 
   -- (10) and the retired numeric semantics stay retired here too.

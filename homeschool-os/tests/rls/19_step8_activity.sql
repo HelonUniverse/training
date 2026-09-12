@@ -1227,18 +1227,36 @@ begin
       'N4. an activity''s provenance may not contradict where it came from');
   end;
 
+  -- A person who SELECTED something from the catalogue has to have selected
+  -- something. Without this, `human_selected` with no resource would be a
+  -- choice nobody could name.
   begin
     insert into public.learning_activities (student_id, skill_id, title, origin,
-                                            record_provenance, created_by, resource_id)
+                                            record_provenance, selected_by)
     values ('44444444-4444-4444-8444-00000000000d',
             (select id from public.skills where code = 'NST.FR.3'), 'N5',
-            'human_created', 'human_entered',
-            '11111111-1111-4111-8111-000000000001',
-            'dddddddd-0000-4000-8000-000000000003');
-    perform t.assert(false, 'N5. a human-created activity carried a catalogue resource');
+            'human_selected', 'human_entered',
+            '11111111-1111-4111-8111-000000000001');
+    perform t.assert(false, 'N5. a catalogue selection named no resource');
   exception when others then
-    perform t.assert(sqlerrm like '%la_human_created_has_no_catalogue_resource_ck%',
-      'N5. inventing an activity and choosing one from the catalogue stay different sentences');
+    perform t.assert(sqlerrm like '%la_human_selected_names_its_resource_ck%',
+      'N5. a catalogue selection has to name the thing that was selected');
+  end;
+
+  -- and an activity a person WROTE carries no rule version and no engine
+  -- reasons, whatever is attached to it. This is what stops her idea being
+  -- recorded as something an ordering produced.
+  begin
+    insert into public.learning_activities (student_id, skill_id, title, origin,
+                                            record_provenance, created_by, rule_version)
+    values ('44444444-4444-4444-8444-00000000000d',
+            (select id from public.skills where code = 'NST.FR.3'), 'N8',
+            'human_created', 'human_entered',
+            '11111111-1111-4111-8111-000000000001', '2026-09-13.1');
+    perform t.assert(false, 'N8. an authored activity was stamped with a selection rule version');
+  exception when others then
+    perform t.assert(sqlerrm like '%la_authored_activity_is_not_a_selection_ck%',
+      'N8. an activity a person wrote is never recorded as one an ordering produced');
   end;
 end $$;
 rollback;
@@ -1266,6 +1284,546 @@ begin
     perform t.assert(false, 'N7. an activity event was deleted');
   exception when others then
     perform t.assert(true, 'N7. and cannot be deleted either');
+  end;
+end $$;
+rollback;
+
+-- =============================================================================
+-- A1-A6. A person may compose an activity AND attach material to it
+-- =============================================================================
+-- "Practise with the measuring cups, then watch this video" is one activity a
+-- mother wrote. The video supports it; the video is not what it is. What
+-- separates human_created from human_selected is who composed the thing, not
+-- whether a resource is attached.
+
+begin;
+do $$
+declare j_bare jsonb; j_res jsonb; a public.learning_activities;
+        b public.learning_activities; e jsonb; v_sel uuid;
+begin
+  perform t.logout();
+  perform t.p8_confirm('NST.FR.3', '11111111-1111-4111-8111-000000000001');
+  perform t.login('11111111-1111-4111-8111-000000000001');
+
+  j_bare := public.create_custom_activity('44444444-4444-4444-8444-00000000000d',
+        (select id from public.skills where code = 'NST.FR.3'),
+        'P8 measuring cups in the kitchen', 'manipulative', 'hands_on', 'en',
+        'Use the 1/2 and 1/4 cups.', null, 15);
+  perform t.assert_eq((j_bare->>'origin'), 'human_created',
+    'A1. a composed activity with no material at all succeeds');
+  perform t.assert_eq((j_bare->>'resource_available')::boolean, false,
+    'A1b. and honestly reports that there is no material behind it');
+
+  j_res := public.create_custom_activity('44444444-4444-4444-8444-00000000000d',
+        (select id from public.skills where code = 'NST.FR.3'),
+        'P8 measuring cups, then watch the video', 'manipulative', 'hands_on', 'en',
+        'Cups first, video after.', null, 25, null,
+        'dddddddd-0000-4000-8000-000000000005');
+  perform t.logout();
+
+  select * into b from public.learning_activities where id = (j_res->>'activity_id')::uuid;
+  perform t.assert_eq(b.resource_id, 'dddddddd-0000-4000-8000-000000000005'::uuid,
+    'A2. the same call may attach a supporting resource');
+  perform t.assert_eq(b.origin::text, 'human_created',
+    'A4. and the resource does not become the origin of the activity');
+  perform t.assert_eq(b.record_provenance::text, 'human_entered',
+    'A3. the provenance is still hers');
+  perform t.assert_eq(b.created_by, '11111111-1111-4111-8111-000000000001'::uuid,
+    'A3b. and it names her');
+  perform t.assert_eq(b.title, 'P8 measuring cups, then watch the video',
+    'A4b. the title is the one she wrote, not the resource''s');
+  perform t.assert(b.rule_version is null,
+    'A4c. no rule version, because no ordering produced it');
+  perform t.assert_eq(array_length(b.selection_reasons, 1), null,
+    'A4d. and no engine reasons either');
+
+  -- the provider and ownership behind the supporting material stay traceable,
+  -- frozen at the moment she attached it.
+  perform t.assert_eq(b.resource_snapshot->>'content_ownership', 'nestra_owned',
+    'A5. who owns the supporting material is recorded on the activity');
+  perform t.assert(b.resource_snapshot->>'license_note' is not null,
+    'A5b. along with what Nestra may do with it');
+  perform t.assert_eq((b.resource_snapshot->>'is_demo')::boolean, true,
+    'A5c. and that it is a demonstration');
+
+  perform t.login('11111111-1111-4111-8111-000000000001');
+  e := public.explain_activity(b.id);
+  perform t.assert_eq((e->>'chosen_by_a_person')::boolean, true,
+    'A5d. the explanation credits her');
+
+  -- and a catalogue selection is still a different sentence.
+  v_sel := (public.choose_activity_resource('44444444-4444-4444-8444-00000000000d',
+             (select id from public.skills where code = 'NST.FR.3'),
+             'dddddddd-0000-4000-8000-000000000005')->>'activity_id')::uuid;
+  perform t.logout();
+  select * into a from public.learning_activities where id = v_sel;
+  perform t.assert_eq(a.origin::text, 'human_selected',
+    'A6. picking something from the catalogue is still human_selected');
+  perform t.assert(a.selected_by is not null and a.created_by is null,
+    'A6b. which names her as the chooser rather than the author');
+  perform t.assert(b.selected_by is null and b.created_by is not null,
+    'A6c. and composing names her as the author rather than the chooser');
+  perform t.assert_eq(a.title, 'Demo: equivalent fractions / fracciones equivalentes',
+    'A6d. a selection carries the resource''s own title, because the resource is the activity');
+end $$;
+rollback;
+
+-- =============================================================================
+-- B. Working with a secure skill again changes nothing about the child
+-- =============================================================================
+
+begin;
+do $$
+declare v_sk uuid; j jsonb; v_act uuid;
+        v_state text; v_state2 text; v_ov int; v_ov2 int;
+        v_ev int; v_ev2 int; v_ref int; v_ref2 int;
+begin
+  perform t.logout();
+  select id into v_sk from public.skills where code = 'NST.FR.3';
+  perform t.p8_state('44444444-4444-4444-8444-00000000000d','NST.FR.3','developing','supported',
+                     '11111111-1111-4111-8111-000000000001');
+  perform t.p8_confirm('NST.FR.3', '11111111-1111-4111-8111-000000000001');
+  perform t.login('11111111-1111-4111-8111-000000000001');
+  perform public.set_skill_state_override('44444444-4444-4444-8444-00000000000d', v_sk,
+                                          'secure', 'P8 she has this');
+  perform t.logout();
+
+  select s.skill_state::text into v_state from public.student_skills s
+   where s.student_id = '44444444-4444-4444-8444-00000000000d' and s.skill_id = v_sk;
+  select count(*)::int into v_ov from public.student_skill_overrides
+   where student_id = '44444444-4444-4444-8444-00000000000d' and skill_id = v_sk;
+  select count(*)::int into v_ev from public.student_skill_events
+   where student_id = '44444444-4444-4444-8444-00000000000d';
+  select count(*)::int into v_ref from public.student_skill_refresh_decisions
+   where student_id = '44444444-4444-4444-8444-00000000000d';
+
+  -- She works on it again anyway, deliberately, and takes it all the way
+  -- through: chosen, started, completed.
+  perform t.login('11111111-1111-4111-8111-000000000001');
+  j := public.choose_activity_resource('44444444-4444-4444-8444-00000000000d', v_sk,
+        'dddddddd-0000-4000-8000-000000000005', null, 'P8 one more look');
+  v_act := (j->>'activity_id')::uuid;
+  perform public.start_activity(v_act);
+  j := public.complete_activity(v_act, 'P8 done again');
+  perform t.logout();
+
+  perform t.assert_eq((j->>'mastery_implied')::boolean, false,
+    'B1. completing an activity on a secure skill implies nothing about mastery');
+
+  select s.skill_state::text into v_state2 from public.student_skills s
+   where s.student_id = '44444444-4444-4444-8444-00000000000d' and s.skill_id = v_sk;
+  perform t.assert_eq(v_state2, v_state,
+    'B2. and secure did not move: no downgrade, no regression');
+  perform t.assert_eq(v_state2, 'secure', 'B2b. it is still secure');
+
+  select count(*)::int into v_ov2 from public.student_skill_overrides
+   where student_id = '44444444-4444-4444-8444-00000000000d' and skill_id = v_sk;
+  perform t.assert_eq(v_ov2, v_ov, 'B3. her confirmation was not touched');
+
+  select count(*)::int into v_ev2 from public.student_skill_events
+   where student_id = '44444444-4444-4444-8444-00000000000d';
+  perform t.assert_eq(v_ev2, v_ev, 'B4. no evidence was created');
+
+  select count(*)::int into v_ref2 from public.student_skill_refresh_decisions
+   where student_id = '44444444-4444-4444-8444-00000000000d';
+  perform t.assert_eq(v_ref2, v_ref,
+    'B5. and no refresh requirement appeared merely because an activity exists');
+end $$;
+rollback;
+
+-- =============================================================================
+-- C1-C6. Availability: a faithful backfill, and an honest default afterwards
+-- =============================================================================
+
+begin;
+do $$
+declare v_new uuid; j jsonb; v_avail text; v_sk uuid;
+begin
+  perform t.logout();
+  select id into v_sk from public.skills where code = 'NST.FR.3';
+
+  -- C1 is proved over genuinely pre-STEP-8 data in tests/migration (section 12);
+  -- here the same guarantee is checked against the rows STEP 5 and 6 shipped.
+  perform t.assert_eq(
+    (select count(*)::int from public.learning_resources r
+      where r.availability = 'unknown'
+        and r.id in ('dddddddd-0000-4000-8000-000000000001',
+                     'dddddddd-0000-4000-8000-000000000002')), 0,
+    'C1. catalogue rows that predate STEP 8 were not retroactively restricted');
+
+  -- C2. A row written from here on says nobody has established availability.
+  insert into public.learning_resources (course_id, kind, title)
+  values ('dddddddd-0000-4000-8000-0000000000ff', 'practice', 'P8 brand new resource')
+  returning id into v_new;
+  select availability::text into v_avail from public.learning_resources where id = v_new;
+  perform t.assert_eq(v_avail, 'unknown',
+    'C2. a resource created after this migration defaults to unknown, not available');
+
+  -- C3. And unknown is not automatically selectable, even fully confirmed.
+  insert into public.resource_skills (resource_id, skill_id, source_type, confirmed,
+                                      confirmed_by, confirmed_at)
+  values (v_new, v_sk, 'manual', true, '11111111-1111-4111-8111-000000000001', now());
+  perform t.assert_eq(
+    (select count(*)::int from app.learning_activity_candidates(
+       '44444444-4444-4444-8444-00000000000d', v_sk) c where c.resource_id = v_new), 0,
+    'C3. a confirmed resource whose availability nobody established is not auto-selected');
+
+  -- C4. Somebody establishes it, and nothing else changes.
+  update public.learning_resources set availability = 'available' where id = v_new;
+  perform t.assert_eq(
+    (select count(*)::int from app.learning_activity_candidates(
+       '44444444-4444-4444-8444-00000000000d', v_sk) c where c.resource_id = v_new), 1,
+    'C4. once a person establishes it, the same row is eligible');
+
+  -- C5. Explicitly blocked stays blocked.
+  update public.learning_resources set availability = 'unavailable' where id = v_new;
+  perform t.assert_eq(
+    (select count(*)::int from app.learning_activity_candidates(
+       '44444444-4444-4444-8444-00000000000d', v_sk) c where c.resource_id = v_new), 0,
+    'C5. an explicitly unavailable resource is not auto-selected');
+
+  -- C6. And a family is never shown "unknown" as though it meant "unavailable".
+  -- Both labels exist, and they do not say the same thing in either language.
+  perform t.assert(
+    app.learning_activity_supply('44444444-4444-4444-8444-00000000000d', v_sk)
+      ->>'blocked_by_availability' is not null,
+    'C6. what is blocked is counted separately from what exists');
+end $$;
+rollback;
+
+-- =============================================================================
+-- D. The lifecycle graph, every cell of it
+-- =============================================================================
+-- 81 pairs, checked against the matrix written down rather than against the
+-- function's own opinion of itself. A graph that is only tested by the code
+-- that implements it is not tested.
+
+begin;
+do $$
+declare
+  v_states text[] := array['proposed','selected','available','started',
+                           'completed','skipped','not_today','replaced','archived'];
+  -- The matrix, transcribed. Same-status is allowed everywhere (an update that
+  -- does not move the status is not a transition), so it is excluded here and
+  -- checked separately.
+  v_allowed jsonb := jsonb_build_object(
+    'proposed',  jsonb_build_array('selected','available','skipped','not_today','replaced','archived'),
+    'selected',  jsonb_build_array('available','started','skipped','not_today','replaced','archived'),
+    'available', jsonb_build_array('selected','started','skipped','not_today','replaced','archived'),
+    'started',   jsonb_build_array('completed','skipped','not_today','replaced','archived'),
+    'completed', jsonb_build_array('archived'),
+    'skipped',   jsonb_build_array('selected','available','started','replaced','archived'),
+    'not_today', jsonb_build_array('selected','available','started','replaced','archived'),
+    'replaced',  jsonb_build_array(),
+    'archived',  jsonb_build_array());
+  f text; tt text; v_want boolean; v_got boolean; v_bad text := '';
+  v_pairs int := 0;
+begin
+  perform t.logout();
+  foreach f in array v_states loop
+    foreach tt in array v_states loop
+      continue when f = tt;
+      v_pairs := v_pairs + 1;
+      v_want := v_allowed->f ? tt;
+      v_got  := app.learning_activity_transition_allowed(
+                  f::app.learning_activity_status, tt::app.learning_activity_status);
+      if v_want is distinct from v_got then
+        v_bad := v_bad || format('%s->%s want %s got %s; ', f, tt, v_want, v_got);
+      end if;
+    end loop;
+  end loop;
+  perform t.assert_eq(v_pairs, 72, 'D1. every ordered pair of distinct statuses was checked');
+  perform t.assert_eq(v_bad, '', 'D2. and the graph matches the matrix exactly: ' || v_bad);
+
+  foreach f in array v_states loop
+    perform t.assert(app.learning_activity_transition_allowed(
+        f::app.learning_activity_status, f::app.learning_activity_status),
+      'D3. an update that does not move the status is never a transition: ' || f);
+  end loop;
+
+  -- The three endings, named individually because they are the point.
+  perform t.assert(not app.learning_activity_transition_allowed('completed','started'),
+    'D4. a completed activity is never un-completed');
+  perform t.assert(not app.learning_activity_transition_allowed('completed','not_today'),
+    'D5. nor put off after the fact');
+  perform t.assert(not app.learning_activity_transition_allowed('replaced','started'),
+    'D6. a replaced activity stays replaced');
+  perform t.assert(not app.learning_activity_transition_allowed('archived','started'),
+    'D7. an archived activity stays archived');
+  perform t.assert_eq(app.learning_activity_transition_refusal('completed','started'),
+    'a_completed_activity_is_not_undone', 'D8. and the refusal is a code, not an opaque error');
+end $$;
+rollback;
+
+begin;
+do $$
+declare j jsonb; v_act uuid; v_sk uuid; v_status text;
+begin
+  perform t.logout();
+  select id into v_sk from public.skills where code = 'NST.FR.3';
+  perform t.login('11111111-1111-4111-8111-000000000001');
+  j := public.create_custom_activity('44444444-4444-4444-8444-00000000000d', v_sk, 'P8 D');
+  v_act := (j->>'activity_id')::uuid;
+
+  -- selected -> completed is not a step. You start something before you finish it.
+  j := public.complete_activity(v_act);
+  perform t.assert_eq((j->>'moved')::boolean, false,
+    'D9. a step the activity cannot take from here is refused, structurally');
+  perform t.assert_eq(j->>'reason', 'not_a_step_this_activity_can_take_from_here',
+    'D10. with a code a screen can render');
+  perform t.assert(j->'allowed_next' ? 'started',
+    'D11. and the answer says what it CAN do instead');
+  perform t.assert_eq((j->>'evidence_created')::boolean, false,
+    'D12. and a refused transition still creates no evidence');
+  select status::text into v_status from public.learning_activities where id = v_act;
+  perform t.assert_eq(v_status, 'selected', 'D13. nothing moved');
+
+  -- The real path: start, then finish.
+  perform public.start_activity(v_act);
+  j := public.complete_activity(v_act);
+  perform t.assert_eq((j->>'moved')::boolean, true, 'D14. started then completed works');
+
+  -- And afterwards the morning stays on the record.
+  j := public.start_activity(v_act);
+  perform t.assert_eq(j->>'reason', 'a_completed_activity_is_not_undone',
+    'D15. a completed activity is not restarted');
+  j := public.not_today_activity(v_act);
+  perform t.assert_eq(j->>'reason', 'a_completed_activity_is_not_undone',
+    'D16. nor put off');
+  j := public.reopen_activity(v_act);
+  perform t.assert_eq((j->>'moved')::boolean, false, 'D17. nor reopened');
+  j := public.archive_activity(v_act);
+  perform t.assert_eq((j->>'moved')::boolean, true, 'D18. archiving it is the one thing left');
+  perform t.logout();
+end $$;
+rollback;
+
+begin;
+do $$
+declare j jsonb; v_act uuid; v_sk uuid; v_status text;
+begin
+  perform t.logout();
+  select id into v_sk from public.skills where code = 'NST.FR.3';
+  perform t.login('11111111-1111-4111-8111-000000000001');
+  j := public.create_custom_activity('44444444-4444-4444-8444-00000000000d', v_sk, 'P8 Tuesday');
+  v_act := (j->>'activity_id')::uuid;
+
+  -- Tuesday went sideways.
+  j := public.not_today_activity(v_act, 'P8 the baby was up all night');
+  perform t.assert_eq((j->>'moved')::boolean, true, 'D19. a morning can be put off');
+  perform t.assert_eq((j->>'failure_implied')::boolean, false, 'D20. and it is not a failure');
+
+  -- Thursday came back.
+  j := public.reopen_activity(v_act, 'selected', 'P8 picking this back up');
+  perform t.assert_eq((j->>'moved')::boolean, true,
+    'D21. and it can be picked back up without inventing a second row');
+  select status::text into v_status from public.learning_activities where id = v_act;
+  perform t.assert_eq(v_status, 'selected', 'D22. it really moved');
+
+  j := public.skip_activity(v_act, 'P8 actually no');
+  j := public.reopen_activity(v_act, 'started', 'P8 changed my mind again');
+  perform t.assert_eq((j->>'moved')::boolean, true, 'D23. a skipped one reopens too');
+  select status::text into v_status from public.learning_activities where id = v_act;
+  perform t.assert_eq(v_status, 'started', 'D24. straight to started, because she is doing it now');
+  perform t.logout();
+end $$;
+rollback;
+
+begin;
+do $$
+declare j jsonb; v_act uuid; v_sk uuid;
+begin
+  perform t.logout();
+  select id into v_sk from public.skills where code = 'NST.FR.3';
+  perform t.login('11111111-1111-4111-8111-000000000001');
+  j := public.create_custom_activity('44444444-4444-4444-8444-00000000000d', v_sk, 'P8 direct');
+  v_act := (j->>'activity_id')::uuid;
+  perform public.start_activity(v_act);
+  perform public.complete_activity(v_act);
+  perform t.logout();
+
+  -- The RPCs refuse politely. The row refuses absolutely, so that a future code
+  -- path cannot reach the same wrong place by a different route.
+  begin
+    update public.learning_activities set status = 'started' where id = v_act;
+    perform t.assert(false, 'D25. a direct update un-completed an activity');
+  exception when others then
+    perform t.assert(sqlerrm like '%cannot go from completed to started%',
+      'D25. the row itself refuses to un-complete an activity');
+  end;
+
+  begin
+    update public.learning_activities set status = 'proposed' where id = v_act;
+    perform t.assert(false, 'D26. a direct update put a completed activity back to proposed');
+  exception when others then
+    perform t.assert(true, 'D26. and refuses to put it back to a proposal');
+  end;
+
+  -- Replacing something that already happened is refused too, and structurally.
+  perform t.login('11111111-1111-4111-8111-000000000001');
+  j := public.replace_activity_resource(v_act, 'dddddddd-0000-4000-8000-000000000005');
+  perform t.logout();
+  perform t.assert_eq((j->>'replaced')::boolean, false,
+    'D27. a completed activity is not swapped out after the fact');
+  perform t.assert_eq(j->>'reason', 'a_completed_activity_is_not_undone',
+    'D28. with the same code');
+end $$;
+rollback;
+
+-- =============================================================================
+-- F1-F6. One definition of "the curriculum this family is using"
+-- =============================================================================
+-- Phase 6 preferred material from ANY enrolment row; STEP 8 prefers ACTIVE
+-- enrolment. 0108 aligns them forward. These prove the alignment happened and
+-- that nothing else about the Learning Path moved.
+
+begin;
+do $$
+declare v_sk uuid; a uuid; b uuid; c uuid; v_enrol uuid;
+begin
+  perform t.logout();
+  select id into v_sk from public.skills where code = 'NST.FR.3';
+  perform t.p8_confirm('NST.FR.3', '11111111-1111-4111-8111-000000000001');
+
+  a := app.path_resource_for('44444444-4444-4444-8444-00000000000d', v_sk);
+  perform t.assert(a is not null, 'F0. the path attaches something with no enrolment at all');
+
+  insert into public.student_course_enrollments (student_id, course_id, family_id, status, created_by)
+  values ('44444444-4444-4444-8444-00000000000d','dddddddd-0000-4000-8000-0000000000fe',
+          '22222222-2222-4222-8222-00000000000a','active',
+          '11111111-1111-4111-8111-000000000001')
+  returning id into v_enrol;
+
+  b := app.path_resource_for('44444444-4444-4444-8444-00000000000d', v_sk);
+  perform t.assert_eq(b, 'dddddddd-0000-4000-8000-000000000003'::uuid,
+    'F1. an ACTIVE enrolment gets enrolled-curriculum priority in the path');
+  perform t.assert_eq(b, (app.learning_activity_select_resource(
+      '44444444-4444-4444-8444-00000000000d', v_sk)->>'resource_id')::uuid,
+    'F1b. and the path and the activity engine now agree on the same row');
+
+  -- The family finished the book in May.
+  update public.student_course_enrollments set status = 'completed' where id = v_enrol;
+  c := app.path_resource_for('44444444-4444-4444-8444-00000000000d', v_sk);
+  perform t.assert_eq(c, a,
+    'F2. a finished enrolment does NOT get priority - it is a fact about last year');
+  perform t.assert(c is distinct from b,
+    'F2b. which is a different answer from the one an active enrolment gives');
+
+  update public.student_course_enrollments set status = 'dropped' where id = v_enrol;
+  perform t.assert_eq(app.path_resource_for('44444444-4444-4444-8444-00000000000d', v_sk), a,
+    'F2c. nor does a dropped one');
+  update public.student_course_enrollments set status = 'paused' where id = v_enrol;
+  perform t.assert_eq(app.path_resource_for('44444444-4444-4444-8444-00000000000d', v_sk), a,
+    'F2d. nor a paused one');
+
+  update public.student_course_enrollments set status = 'active' where id = v_enrol;
+  perform t.assert_eq(app.path_resource_for('44444444-4444-4444-8444-00000000000d', v_sk),
+    app.path_resource_for('44444444-4444-4444-8444-00000000000d', v_sk),
+    'F3. and the answer is the same every time it is asked');
+  perform t.assert_eq(app.path_resource_for('44444444-4444-4444-8444-00000000000d', v_sk), b,
+    'F3b. reactivating restores the enrolled answer exactly');
+end $$;
+rollback;
+
+begin;
+do $$
+declare v_before text; v_after text; v_enrol uuid; v_path uuid; v_snap text;
+        v_approved text; v_v2 text;
+begin
+  perform t.logout();
+  perform t.p8_confirm('NST.FR.3', '11111111-1111-4111-8111-000000000001');
+  perform t.p8_state('44444444-4444-4444-8444-00000000000d','NST.FR.1','developing','supported',
+                     '11111111-1111-4111-8111-000000000001');
+  perform t.p8_state('44444444-4444-4444-8444-00000000000d','NST.FR.2','developing','supported',
+                     '11111111-1111-4111-8111-000000000001');
+
+  -- F4. Which skills reach the path, and in what order, has nothing to do with
+  -- enrolment: path_resource_for runs after the candidates are chosen.
+  select string_agg(c.code || '/' || c.reason_code, ',' order by c.reason_rank, c.code)
+    into v_before from app.path_candidates('44444444-4444-4444-8444-00000000000d',
+      (select id from public.skills where code = 'NST.FR.1')) c;
+
+  insert into public.student_course_enrollments (student_id, course_id, family_id, status, created_by)
+  values ('44444444-4444-4444-8444-00000000000d','dddddddd-0000-4000-8000-0000000000fe',
+          '22222222-2222-4222-8222-00000000000a','active',
+          '11111111-1111-4111-8111-000000000001')
+  returning id into v_enrol;
+
+  select string_agg(c.code || '/' || c.reason_code, ',' order by c.reason_rank, c.code)
+    into v_after from app.path_candidates('44444444-4444-4444-8444-00000000000d',
+      (select id from public.skills where code = 'NST.FR.1')) c;
+  perform t.assert_eq(v_after, v_before,
+    'F4. candidate skill routing is untouched by enrolment, active or otherwise');
+
+  update public.student_course_enrollments set status = 'completed' where id = v_enrol;
+  select string_agg(c.code || '/' || c.reason_code, ',' order by c.reason_rank, c.code)
+    into v_after from app.path_candidates('44444444-4444-4444-8444-00000000000d',
+      (select id from public.skills where code = 'NST.FR.1')) c;
+  perform t.assert_eq(v_after, v_before, 'F4b. and by the enrolment ending');
+
+  -- F5. Versioning and what a parent approved.
+  update public.student_course_enrollments set status = 'active' where id = v_enrol;
+  v_path := t.p8_path('44444444-4444-4444-8444-00000000000d','NST.FR.1',
+                      '11111111-1111-4111-8111-000000000001');
+  perform t.login('11111111-1111-4111-8111-000000000001');
+  perform public.approve_learning_path(v_path, 'P8 yes');
+  perform t.logout();
+  select string_agg(n.skill_id::text || ':' || n.position || ':' || coalesce(n.resource_id::text,'-'),
+                    ',' order by n.position)
+    into v_approved from public.learning_path_nodes n where n.path_id = v_path;
+
+  -- The enrolment ends. Her approved path does not move.
+  update public.student_course_enrollments set status = 'completed' where id = v_enrol;
+  select string_agg(n.skill_id::text || ':' || n.position || ':' || coalesce(n.resource_id::text,'-'),
+                    ',' order by n.position)
+    into v_snap from public.learning_path_nodes n where n.path_id = v_path;
+  perform t.assert_eq(v_snap, v_approved,
+    'F5. the path a parent approved is exactly as she approved it, enrolment or no enrolment');
+  perform t.assert_eq((select status::text from public.learning_paths where id = v_path),
+    'approved', 'F5b. and it is still the approved version');
+
+  -- F6. Standards, grade and age still decide nothing about a path.
+  update public.students set grade_level = '1', date_of_birth = date '2004-01-01'
+   where id = '44444444-4444-4444-8444-00000000000d';
+  select string_agg(c.code || '/' || c.reason_code, ',' order by c.reason_rank, c.code)
+    into v_after from app.path_candidates('44444444-4444-4444-8444-00000000000d',
+      (select id from public.skills where code = 'NST.FR.1')) c;
+  perform t.assert_eq(v_after, v_before, 'F6. grade and age still decide nothing about a path');
+
+  alter table public.standards rename to standards_hidden_f6;
+  select string_agg(c.code || '/' || c.reason_code, ',' order by c.reason_rank, c.code)
+    into v_after from app.path_candidates('44444444-4444-4444-8444-00000000000d',
+      (select id from public.skills where code = 'NST.FR.1')) c;
+  perform t.assert_eq(v_after, v_before,
+    'F6b. and the path still runs with the standards catalogue renamed away');
+  alter table public.standards_hidden_f6 rename to standards;
+end $$;
+rollback;
+
+begin;
+do $$
+begin
+  perform t.logout();
+  -- The alignment itself is guarded: a selector that prefers enrolment without
+  -- requiring it to be active puts the two answers back out of step, silently.
+  execute $x$
+    create or replace function app.path_resource_for(p_student uuid, p_skill uuid)
+    returns uuid language sql stable security invoker set search_path = '' as $body$
+      select r.id from public.resource_skills rs
+        join public.learning_resources r on r.id = rs.resource_id
+       where rs.confirmed
+       order by case when exists (select 1 from public.student_course_enrollments e
+                                   where e.student_id = p_student) then 0 else 1 end,
+                r.id
+       limit 1;
+    $body$;
+  $x$;
+  begin
+    perform app.assert_schema_invariants();
+    perform t.assert(false, 'F7. the invariants accepted two different definitions of enrolment');
+  exception when others then
+    perform t.assert(sqlerrm like '%not the curriculum they are using%',
+      'F7. a selector that prefers a finished enrolment is refused');
   end;
 end $$;
 rollback;

@@ -1144,6 +1144,18 @@
       "awaitingConfirmation": "{count} esperando revisión",
       "blockedByAvailability": "{count} que no puedes abrir ahora mismo",
       "blockedByInactiveHome": "{count} en un curso que ya no está activo"
+    },
+    "pickBackUp": "Retomar esto",
+    "pickBackUpNote": "Los días salen distintos a lo planeado. Retomar algo es lo normal, y no se le contó en contra a nadie.",
+    "supportingResource": "Junto con",
+    "supportingResourceNote": "Tu actividad, con algo de tu biblioteca al lado. Sigue siendo tuya.",
+    "refusal": {
+      "aCompletedActivityIsNotUndone": "Esto ya lo hicieron. Si quieren hacerlo otra vez, añádelo como una actividad nueva: así la primera vez queda en el registro.",
+      "aReplacedActivityStaysReplaced": "Cambiaste esta antes.",
+      "anArchivedActivityStaysArchived": "Esta está guardada.",
+      "notAStepThisActivityCanTakeFromHere": "Ese no es un paso que esta pueda dar desde donde está.",
+      "anotherActivityIsAlreadyLiveOnThisStep": "Ya hay algo elegido para este paso. Aparta eso primero si prefieres retomar esta.",
+      "reopeningMeansSelectedAvailableOrStarted": "Retomar algo significa volver a elegirlo o empezarlo."
     }
   }
 }

@@ -248,16 +248,30 @@ comment on column public.learning_resources.activity_kind is
   'The finer shape of this material, where somebody has said. Null means '
   'nobody has - it is never inferred from the coarse kind.';
 
--- `availability` defaults to `available`, and that is a faithful statement of
--- what the schema already meant rather than a new claim: before this migration
--- every catalogue row was openable as far as the system was concerned. The
--- other labels are POSITIVE statements that something is in the way, and only
--- those make a resource ineligible. `unknown` is for integrations that report
--- an indeterminate state.
+-- AVAILABILITY HAS TWO DIFFERENT DEFAULTS, AND THE SPLIT IS DELIBERATE.
+--
+-- The column is ADDED with `available`, which back-fills every row already in
+-- the catalogue. That is not a new claim about them: before this migration
+-- every row was openable as far as the system was concerned, and a backfill
+-- that said otherwise would silently remove material from families who are
+-- using it today. Retroactively inventing a restriction is the one thing a
+-- migration over live data must not do.
+--
+-- The DEFAULT is then changed to `unknown`, which is what every row written
+-- from here on gets. Going forward, `available` means somebody has established
+-- that this can be opened; `unknown` means nobody has. Automatic selection
+-- requires `available`, so an unestablished row is not offered - but it is NOT
+-- unavailable, and nothing may present it as though it were. "We have not
+-- checked" and "you cannot open this" are different sentences about different
+-- things, and only the second one is about access being blocked.
+alter table public.learning_resources
+  alter column availability set default 'unknown';
+
 comment on column public.learning_resources.availability is
-  'Whether this can be opened today. Defaults to available because that is what '
-  'every pre-existing catalogue row already meant; the other labels are '
-  'positive statements that access is blocked.';
+  'Whether this can be opened today. Rows that predate STEP 8 were back-filled '
+  'as available because that is what the schema already meant for them; new '
+  'rows default to unknown, which means nobody has established availability - '
+  'not that access is blocked. Only `available` is automatically selectable.';
 
 comment on column public.learning_resources.integration_mode is
   'How work with this material is ACTUALLY tracked today. `integrated` may only '
@@ -311,6 +325,13 @@ create table public.learning_activities (
   origin              app.learning_activity_origin not null,
   record_provenance   app.record_provenance not null,
 
+  -- What the material was, at the moment it was attached. Frozen on purpose: a
+  -- provider can retitle a lesson, let a subscription lapse or withdraw content
+  -- entirely, and "why was my daughter doing this in March" has to stay
+  -- answerable afterwards. The live row is still joined for anything current;
+  -- this is the historical account, and it is the only one that cannot rot.
+  resource_snapshot   jsonb not null default '{}'::jsonb,
+
   -- Why this one. Structured; the sentence on the screen is generated from it.
   selection_reasons   app.learning_resource_reason[] not null default '{}',
   -- Everything the selector looked at, frozen. Read two years later, "why this
@@ -351,12 +372,33 @@ alter table public.learning_activities
       else true
     end);
 
--- A human-created activity is the family's own idea. It has no catalogue
--- resource by definition - a person choosing something from the catalogue is
--- `human_selected`, which is a different sentence.
+-- WHAT SEPARATES `human_created` FROM `human_selected` IS WHO COMPOSED THE
+-- ACTIVITY, NOT WHETHER A RESOURCE IS ATTACHED.
+--
+--   human_selected  a person picked an existing catalogue resource, and THAT
+--                   is the activity. So there has to be one.
+--   human_created   a person AUTHORED the activity - "practise with the
+--                   measuring cups, then watch this video". A catalogue
+--                   resource may support it, and often should; it is not what
+--                   the activity is.
+--
+-- An earlier version of this schema forbade a resource on an authored activity
+-- entirely, which forced that perfectly ordinary sentence to be split into two
+-- rows or flattened into a selection somebody did not make. What actually needs
+-- protecting is narrower and is protected below: an authored activity must
+-- never look like something the system chose.
 alter table public.learning_activities
-  add constraint la_human_created_has_no_catalogue_resource_ck check (
-    origin <> 'human_created' or resource_id is null);
+  add constraint la_human_selected_names_its_resource_ck check (
+    origin <> 'human_selected' or resource_id is not null);
+
+-- An activity a person wrote carries no rule version and no engine reasons,
+-- because no ordering produced it. Attaching a supporting video does not turn
+-- her idea into a deterministic selection, and this is what stops it being
+-- recorded as one.
+alter table public.learning_activities
+  add constraint la_authored_activity_is_not_a_selection_ck check (
+    origin <> 'human_created'
+    or (rule_version is null and selection_reasons = '{}'::app.learning_resource_reason[]));
 
 -- Provenance restates origin in the vocabulary the rest of the schema audits
 -- on, and the two may never disagree. A deterministic ORDER BY labelled as an
@@ -428,6 +470,11 @@ comment on column public.learning_activities.skill_id is
   'The target, and it does not move. Replacing the resource keeps this '
   'unchanged: that is what makes replacement a change of material rather than a '
   'change of what the child is working on.';
+
+comment on column public.learning_activities.resource_snapshot is
+  'What the attached material was when it was attached - title, provider, '
+  'ownership, licence note and availability. Frozen so that the explanation of '
+  'a choice survives the provider changing or withdrawing it.';
 
 comment on column public.learning_activities.selection_reasons is
   'The structured answer to "why this one". Generated prose is presentation '
