@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Session } from '@supabase/supabase-js';
+import { Platform } from 'react-native';
 import React, {
   createContext,
   useCallback,
@@ -64,6 +65,12 @@ interface AppContextValue {
   signIn: (email: string, password: string) => Promise<AuthResult>;
   signUp: (email: string, password: string, name: string) => Promise<AuthResult>;
   signOut: () => Promise<void>;
+  /** Manda el correo con el enlace para poner una contraseña nueva. */
+  requestPasswordReset: (email: string) => Promise<AuthResult>;
+  /** Guarda la contraseña nueva. Solo funciona con el enlace del correo abierto. */
+  updatePassword: (password: string) => Promise<AuthResult>;
+  /** true mientras se está usando un enlace de recuperación. */
+  recovering: boolean;
   toggleSaved: (teachingId: string) => void;
   isSaved: (teachingId: string) => boolean;
   markAsRead: (teachingId: string) => void;
@@ -88,6 +95,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AppState>(initialState);
   const [hydrated, setHydrated] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [recovering, setRecovering] = useState(false);
   const hydratedRef = useRef(false);
   const userIdRef = useRef<string | null>(null);
 
@@ -187,6 +195,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (data.session) loadProfile(data.session).catch(() => {});
     });
     const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      // El enlace del correo abre una sesión de recuperación. Sirve para
+      // guardar una contraseña nueva y para nada más: no se carga el perfil,
+      // así el guardia de rutas no la deja pasar a la app.
+      if (event === 'PASSWORD_RECOVERY') {
+        setRecovering(true);
+        return;
+      }
       if (session && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED')) {
         loadProfile(session).catch(() => {});
       }
@@ -257,8 +272,46 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [loadProfile],
   );
 
+  /**
+   * El correo de recuperación devuelve a la app con una sesión especial. Hasta
+   * que no se guarde la contraseña nueva, esa sesión no debe servir para
+   * entrar: de ahí `recovering`, que el guardia de rutas respeta.
+   */
+  const requestPasswordReset = useCallback(async (email: string): Promise<AuthResult> => {
+    if (!supabase) return { ok: false, message: 'El backend no está configurado.' };
+    setBusy(true);
+    try {
+      const redirectTo =
+        Platform.OS === 'web' && typeof window !== 'undefined'
+          ? `${window.location.origin}/nueva-contrasena`
+          : undefined;
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo });
+      if (error) return { ok: false, message: authErrorMessage(error) };
+      return { ok: true, message: 'Te mandamos un enlace para poner una contraseña nueva.' };
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  const updatePassword = useCallback(async (password: string): Promise<AuthResult> => {
+    if (!supabase) return { ok: false, message: 'El backend no está configurado.' };
+    setBusy(true);
+    try {
+      const { data, error } = await supabase.auth.updateUser({ password });
+      if (error) return { ok: false, message: authErrorMessage(error) };
+      setRecovering(false);
+      const { data: sesion } = await supabase.auth.getSession();
+      if (sesion.session) await loadProfile(sesion.session);
+      else if (data.user) return { ok: true, message: 'Contraseña cambiada. Ya puedes entrar.' };
+      return { ok: true };
+    } finally {
+      setBusy(false);
+    }
+  }, [loadProfile]);
+
   const signOut = useCallback(async () => {
     if (supabase) await supabase.auth.signOut().catch(() => {});
+    setRecovering(false);
     setState({ ...initialState });
   }, []);
 
@@ -407,6 +460,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       signIn,
       signUp,
       signOut,
+      requestPasswordReset,
+      updatePassword,
+      recovering,
       toggleSaved,
       isSaved: (id: string) => state.savedTeachings.includes(id),
       markAsRead,
@@ -422,7 +478,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       resetDemo,
     }),
     [
-      state, hydrated, busy, signIn, signUp, signOut, toggleSaved,
+      state, hydrated, busy, recovering, signIn, signUp, signOut,
+      requestPasswordReset, updatePassword, toggleSaved,
       markAsRead, toggleCircle, toggleResonance, setPathAnswer, savePath, resetPath,
       addBooking, cancelBooking, resetDemo,
     ],

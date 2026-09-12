@@ -22,7 +22,7 @@ import { colors, fonts, glowText, radius, screenPadding, spacing } from '@/theme
 export default function AdminScreen() {
   const router = useRouter();
   const { state, hasAccounts } = useApp();
-  const { teachings, guides, circles, liveEvents, source } = useContent();
+  const { teachings, guides, services, circles, liveEvents, source } = useContent();
 
   const isAdmin = state.user?.role === 'admin';
 
@@ -139,6 +139,80 @@ export default function AdminScreen() {
 
       <View style={styles.section}>
         <SectionHeader
+          overline="En vivo"
+          title={liveEvents.length ? `${liveEvents.length} encuentros` : 'Ningún encuentro'}
+          actionLabel="Nuevo"
+          onAction={() => router.push('/admin/encuentro/nuevo')}
+        />
+        <View style={{ height: spacing.lg }} />
+        {liveEvents.length === 0 ? (
+          <Card>
+            <Text style={styles.warnText}>
+              Los encuentros son lo que más se mueve: una ceremonia es de un día concreto.
+              Ábrelos aquí y aparecen en la pestaña En Vivo.
+            </Text>
+          </Card>
+        ) : (
+          <View style={styles.list}>
+            {liveEvents.map((e) => (
+              <Row
+                key={e.id}
+                title={e.title}
+                caption={`${e.startsAt} · ${e.durationMinutes} min${e.status === 'live' ? ' · en vivo' : ''}`}
+                onPress={() => router.push(`/admin/encuentro/${e.id}`)}
+              />
+            ))}
+          </View>
+        )}
+      </View>
+
+      <View style={styles.section}>
+        <SectionHeader
+          overline="Servicios"
+          title={services.length ? `${services.length} a reservar` : 'Nada que reservar'}
+          actionLabel="Nuevo"
+          onAction={() => router.push('/admin/servicio/nuevo')}
+        />
+        <View style={{ height: spacing.lg }} />
+        {services.length === 0 ? (
+          <Card>
+            <Text style={styles.warnText}>
+              Sin servicios nadie puede reservar con ninguna guía: el botón de reservar no
+              existe hasta que haya algo que reservar.
+            </Text>
+          </Card>
+        ) : (
+          <View style={styles.list}>
+            {services.map((sv) => (
+              <Row
+                key={sv.id}
+                title={sv.name}
+                caption={`${guides.find((g) => g.id === sv.guideId)?.name ?? '—'} · ${sv.format} · $${sv.price}`}
+                onPress={() => router.push(`/admin/servicio/${sv.id}`)}
+              />
+            ))}
+          </View>
+        )}
+      </View>
+
+      <View style={styles.section}>
+        <SectionHeader
+          overline="Personas"
+          title={members === null ? 'Quién está en la Red' : `${members} en la Red`}
+          actionLabel="Ver todas"
+          onAction={() => router.push('/admin/personas')}
+        />
+        <View style={{ height: spacing.lg }} />
+        <Card onPress={() => router.push('/admin/personas')}>
+          <Text style={styles.warnText}>
+            Dar acceso a alguien: que cree su cuenta en la app y la asciendas desde aquí. Su
+            contraseña la elige ella y no la sabe nadie más.
+          </Text>
+        </Card>
+      </View>
+
+      <View style={styles.section}>
+        <SectionHeader
           overline="Reservas"
           title={bookings.length ? `${bookings.length} recibidas` : 'Todavía ninguna'}
           actionLabel={loading ? undefined : 'Actualizar'}
@@ -176,9 +250,8 @@ export default function AdminScreen() {
         <Card>
           <Text style={styles.noteTitle}>Lo que todavía no se edita aquí</Text>
           <Text style={styles.warnText}>
-            Los {circles.length} círculos, los {liveEvents.length} encuentros en vivo y las
-            preguntas de Mi Camino se cambian por ahora desde Supabase. Contenido{' '}
-            {source === 'remote' ? 'en vivo' : 'local'}.
+            Los círculos ({circles.length}) y las preguntas de Mi Camino se cambian por ahora
+            desde Supabase. Contenido {source === 'remote' ? 'en vivo' : 'local'}.
           </Text>
         </Card>
       </View>

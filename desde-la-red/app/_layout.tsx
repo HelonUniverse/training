@@ -78,6 +78,15 @@ export default function RootLayout() {
                   name="admin/guia/[id]"
                   options={{ animation: 'slide_from_bottom' }}
                 />
+                <Stack.Screen
+                  name="admin/encuentro/[id]"
+                  options={{ animation: 'slide_from_bottom' }}
+                />
+                <Stack.Screen
+                  name="admin/servicio/[id]"
+                  options={{ animation: 'slide_from_bottom' }}
+                />
+                <Stack.Screen name="admin/personas" />
               </Stack>
             </ToastProvider>
           </ContentProvider>
@@ -96,7 +105,7 @@ export default function RootLayout() {
  * guardadas de antes —que no tienen id— también quedan fuera.
  */
 function AuthGate() {
-  const { state, hydrated } = useApp();
+  const { state, hydrated, recovering } = useApp();
   const segments = useSegments();
   const router = useRouter();
 
@@ -105,12 +114,22 @@ function AuthGate() {
   // El splash decide por su cuenta a dónde mandar; no se le interrumpe.
   const onSplash = !group;
   const inAuth = group === '(auth)';
+  // Quien llega del correo a poner una contraseña nueva se queda ahí, con
+  // sesión o sin ella: expulsarla sería dejarla sin forma de recuperarla.
+  const onReset = (segments as string[])[1] === 'nueva-contrasena';
 
   useEffect(() => {
-    if (!hydrated || onSplash) return;
+    if (!hydrated || onSplash || onReset) return;
     if (!signedIn && !inAuth) router.replace('/(auth)/login');
     else if (signedIn && inAuth) router.replace('/(tabs)/hoy');
-  }, [hydrated, signedIn, inAuth, onSplash, router]);
+  }, [hydrated, signedIn, inAuth, onSplash, onReset, router]);
+
+  // Con el enlace abierto, la app lleva a esa pantalla aunque se haya pedido
+  // otra ruta: el enlace del correo aterriza en la raíz en algunos clientes.
+  useEffect(() => {
+    if (!recovering || onReset) return;
+    router.replace('/(auth)/nueva-contrasena');
+  }, [recovering, onReset, router]);
 
   return null;
 }

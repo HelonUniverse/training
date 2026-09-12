@@ -30,7 +30,7 @@ type Mode = 'login' | 'registro';
 export default function LoginScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { signIn, signUp, busy } = useApp();
+  const { signIn, signUp, requestPasswordReset, busy } = useApp();
   const toast = useToast();
 
   const [mode, setMode] = useState<Mode>('login');
@@ -83,6 +83,25 @@ export default function LoginScreen() {
       icon: 'sun',
     });
     router.replace('/(tabs)/hoy');
+  };
+
+  const forgot = async () => {
+    if (busy) return;
+    const mail = email.trim().toLowerCase();
+    if (!mail || !mail.includes('@')) {
+      setError('Escribe tu correo y vuelve a tocar aquí.');
+      setNotice(null);
+      return;
+    }
+    setError(null);
+    const result = await requestPasswordReset(mail);
+    if (!result.ok) {
+      setError(result.message ?? 'No se pudo mandar el correo.');
+      haptics.warn();
+      return;
+    }
+    haptics.success();
+    setNotice(result.message ?? 'Revisa tu correo.');
   };
 
   return (
@@ -165,6 +184,17 @@ export default function LoginScreen() {
               secure
               editable={!busy}
             />
+
+            {mode === 'login' ? (
+              <Pressable
+                accessibilityRole="button"
+                onPress={forgot}
+                disabled={busy}
+                style={({ pressed }) => [styles.forgot, pressed && { opacity: 0.6 }]}
+              >
+                <Text style={styles.forgotText}>Olvidé mi contraseña</Text>
+              </Pressable>
+            ) : null}
 
             {error ? <Text style={styles.error}>{error}</Text> : null}
             {notice ? <Text style={styles.notice}>{notice}</Text> : null}
@@ -324,6 +354,13 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: colors.text,
     padding: 0,
+  },
+  forgot: { alignSelf: 'flex-start', paddingVertical: 2 },
+  forgotText: {
+    fontFamily: fonts.body,
+    fontSize: 12.5,
+    color: colors.textMuted,
+    textDecorationLine: 'underline',
   },
   error: {
     fontFamily: fonts.body,
