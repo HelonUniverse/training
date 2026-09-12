@@ -949,9 +949,16 @@ begin
 end $$;
 rollback;
 
+-- Phase-proof on purpose. This used to assert "there are exactly 2", which is a
+-- fact about how many demo rows existed in September rather than the guarantee
+-- anybody cares about - and STEP 8 seeding six more broke it without breaking
+-- anything real. The guarantee is that NOTHING living in a Nestra demonstration
+-- course is unmarked, whatever the count grows to.
 select t.assert_eq(
-  (select count(*)::int from public.learning_resources where is_demo),
-  2, '39a. the seed resources are marked as demonstrations');
+  (select count(*)::int from public.learning_resources r
+     join public.courses c on c.id = r.course_id
+    where c.name like 'Nestra demonstration%' and not r.is_demo),
+  0, '39a. every seed resource in a demonstration course is marked as one');
 select t.assert_eq(
   (select count(*)::int from public.learning_resources r
     where r.is_demo and r.title not like 'Demo:%'),

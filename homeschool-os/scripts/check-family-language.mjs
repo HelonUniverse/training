@@ -53,12 +53,12 @@ const BANNED = [
   [/\b(skill|mastery) (has )?declined\b/i, 'nothing declined; we simply have not seen it lately'],
   [/\bno longer secure\b/i,             '`secure` stays `secure` while a revisit is suggested'],
   [/\bneeds? remediation\b/i,           'a revisit is an invitation, not a treatment plan'],
-  [/\boverdue\b/i,                      'an interval elapsing is not a deadline missed', /^refresh\./],
+  [/\boverdue\b/i,                      'an interval elapsing is not a deadline missed', /^(refresh|activity)\./],
   [/\bregress(ed|ion|ing)\b/i,          'Nestra never asserts a child went backwards'],
   [/\bolvidando\b/i,                    'a gap in our records is not a claim about how a child remembers'],
   [/\bha disminuido\b/i,                'nothing declined; we simply have not seen it lately'],
   [/\bya no (es|est[áa]) seguro\b/i,    '`secure` stays `secure` while a revisit is suggested'],
-  [/\bvencid[oa]\b/i,                   'an interval elapsing is not a deadline missed', /^refresh\./],
+  [/\bvencid[oa]\b/i,                   'an interval elapsing is not a deadline missed', /^(refresh|activity)\./],
   // STEP 7 phase 5. A diagnostic is where grade level tries hardest to come
   // back, because the whole genre it resembles is built on it. An item is never
   // a grade's item, a child is never too old or too young for one, and an
@@ -102,6 +102,45 @@ const BANNED = [
   [/\bvac[íi]os? de conocimiento\b/i,  'a gap in our records is not a gap in a child'],
   [/\bnivel de dominio\b/i,            'a child is not a percentage', /^path\./],
   [/\basignad[oa] a (tu|su) (hija|hijo)\b/i, 'Nestra proposes; it never assigns'],
+  // STEP 8 phase 1. Two different ways this layer turns into school. The first
+  // is homework: an activity that is owed, late, or failed, when the honest
+  // sentence is that a morning went differently than planned. The second is
+  // quieter and worse - a claim about WHO THE CHILD IS. "She's a visual
+  // learner" is a diagnosis the evidence for does not exist, and once the copy
+  // says it, every future feature routes around it: the girl labelled at seven
+  // gets videos at eleven because a sentence said so. Modality describes the
+  // ACTIVITY. It never describes her.
+  [/\bvisual learner\b/i,               'modality describes an activity, never a child'],
+  [/\b(auditory|kinesthetic|hands[- ]on|tactile) learner\b/i,
+                                        'modality describes an activity, never a child'],
+  [/\blearning style\b/i,               'Nestra does not assign a child a permanent style'],
+  [/\brequired activity\b/i,            'Nestra proposes an activity; a family is never required to do one'],
+  [/\bassignment (is )?required\b/i,    'Nestra proposes; it never assigns required work'],
+  [/\bassigned (activity|work|lesson)\b/i, 'Nestra proposes; it never assigns'],
+  // Key-scoped, for the same reason `overdue` and `vencido` are: a required
+  // FORM FIELD is genuinely required, and `common.required` = "Obligatorio" is
+  // a correct label on an input. What must never happen is an ACTIVITY being
+  // described as obligatory, so the rule watches the copy where the subject is
+  // a child's work rather than a text box. Ban the claim, not the word.
+  [/\bmandatory\b/i,                    'nothing a family does with their own child is mandatory here',
+                                        /^(activity|path)\./],
+  [/\bremediation\b/i,                  'a different way in is not a treatment plan'],
+  [/\bfailed (the |this )?(activity|lesson|worksheet)\b/i,
+                                        'an activity that did not happen is not a failure'],
+  [/\bincomplete work\b/i,              'a morning that went differently is not a debt'],
+  [/\bmissed (activit|lesson|work)/i,    'a skipped activity is not a mark against anyone'],
+  [/\b(you |she |he )?must (do|finish|complete) (this|it)\b/i,
+                                        'a suggestion a parent can decline is not an obligation'],
+  [/\baprendiz (visual|auditiv[oa]|kinest[ée]sic[oa])\b/i,
+                                        'modality describes an activity, never a child'],
+  [/\bestilo de aprendizaje\b/i,        'Nestra does not assign a child a permanent style'],
+  [/\bactividad (obligatoria|requerida)\b/i,
+                                        'Nestra proposes an activity; a family is never required to do one'],
+  [/\b(tarea|actividad) asignada\b/i,   'Nestra proposes; it never assigns'],
+  [/\bobligatori[oa]\b/i,               'nothing a family does with their own child is mandatory here',
+                                        /^(activity|path)\./],
+  [/\bremediaci[óo]n\b/i,               'a different way in is not a treatment plan'],
+  [/\btrabajo incompleto\b/i,           'a morning that went differently is not a debt'],
   // Spanish - the same claims, which is the point of checking both catalogs
   [/\best[áa]ndar requerido\b/i,        'a standard is a reference, never a requirement'],
   [/\bdebe completar\b/i,               'nothing must be completed by a date'],
@@ -118,6 +157,43 @@ function flatten(object, prefix = '') {
     else out.push([`${prefix}${k}`, String(v)]);
   }
   return out;
+}
+
+/**
+ * A key-scoped rule can die silently: narrow the scope a little too far and the
+ * pattern stops matching anything, the build stays green, and the sentence it
+ * was written to prevent walks straight in. That has already happened once in
+ * this file.
+ *
+ * So every scoped rule carries a specimen - a key INSIDE its scope and a string
+ * it must flag. These are not real catalog entries; they exist only to prove
+ * the rule is still alive.
+ */
+const MUST_BE_FLAGGED = [
+  ['refresh.probe',  'This revisit is overdue'],
+  ['activity.probe', 'This activity is overdue'],
+  ['refresh.probe',  'Esta revisión está vencida'],
+  ['activity.probe', 'Esta actividad está vencida'],
+  ['path.probe',     'Her mastery level is 72%'],
+  ['path.probe',     'Su nivel de dominio es 72%'],
+  ['activity.probe', 'This activity is mandatory'],
+  ['activity.probe', 'Esta actividad es obligatoria'],
+];
+
+function flag(key, value) {
+  for (const [pattern, , keyScope] of BANNED) {
+    if (keyScope && !keyScope.test(key)) continue;
+    if (pattern.test(value)) return true;
+  }
+  return false;
+}
+
+const dead = MUST_BE_FLAGGED.filter(([key, value]) => !flag(key, value));
+if (dead.length > 0) {
+  console.error('A guard in this file no longer catches what it was written for:\n');
+  for (const [key, value] of dead) console.error(`  ${key}  "${value}"`);
+  console.error('\nA rule that flags nothing is a comment. Widen its key scope or fix its pattern.');
+  process.exit(1);
 }
 
 const problems = [];
@@ -144,4 +220,4 @@ if (problems.length > 0) {
   process.exit(1);
 }
 
-console.log(`family language: ok (${LOCALES.length} catalogs)`);
+console.log(`family language: ok (${LOCALES.length} catalogs, ${MUST_BE_FLAGGED.length} live-guard probes)`);

@@ -329,3 +329,68 @@ begin
 end $$;
 
 select t.assert(true, '--- migration regression complete ---');
+
+-- =============================================================================
+-- 12. STEP 8 PHASE 1 over a catalogue that predates it
+-- =============================================================================
+-- Two legacy resources, seeded at the 0103 boundary, written by somebody who
+-- was never asked about availability, language, ownership or modality.
+
+do $$
+declare r public.learning_resources; v_n int;
+begin
+  select * into r from public.learning_resources
+   where id = '0aaaaaaa-0000-4000-8000-00000000e001';
+  if not found then
+    raise exception '12a. the legacy catalogue rows were never seeded - this section tested nothing';
+  end if;
+
+  if r.availability <> 'available' then
+    raise exception
+      '12b. a legacy resource came out of the migration as %, not available. Before 0103 every '
+      'catalogue row was openable as far as the system was concerned, and changing that silently '
+      'removes material from families using it today', r.availability;
+  end if;
+
+  if r.activity_kind is not null then
+    raise exception
+      '12c. a legacy resource was given activity_kind = % by the migration. Nobody said what shape '
+      'it is, and deriving one from the coarse kind would be Nestra inventing metadata and then '
+      'ranking on it', r.activity_kind;
+  end if;
+
+  if r.language <> 'unknown' then
+    raise exception '12d. a legacy resource was assigned a language nobody stated: %', r.language;
+  end if;
+  if r.content_ownership <> 'unknown' then
+    raise exception '12e. a legacy resource was assigned an owner nobody stated: %', r.content_ownership;
+  end if;
+  if r.modality <> 'unspecified' then
+    raise exception '12f. a legacy resource was assigned a modality nobody stated: %', r.modality;
+  end if;
+  if r.integration_mode = 'integrated' then
+    raise exception '12g. a legacy resource now claims a live integration';
+  end if;
+  if r.is_demo then
+    raise exception '12h. a legacy production resource was marked as a Nestra demonstration';
+  end if;
+
+  -- and its unconfirmed mapping is still unconfirmed: the migration did not
+  -- quietly promote anything into eligibility.
+  select count(*) into v_n from public.resource_skills rs
+   where rs.resource_id = r.id and rs.confirmed;
+  if v_n <> 0 then
+    raise exception '12i. the migration confirmed a mapping nobody had reviewed';
+  end if;
+
+  -- the whole legacy catalogue is eligible-shaped but nothing is eligible,
+  -- because eligibility needs a person and there has not been one.
+  select count(*) into v_n
+    from app.learning_activity_candidates(
+      '44444444-4444-4444-8444-00000000000d',
+      (select id from public.skills where code = 'NST.FR.1'));
+  if v_n <> 0 then
+    raise exception
+      '12j. a legacy resource became automatically selectable without anybody confirming its mapping (% candidates)', v_n;
+  end if;
+end $$;
