@@ -53,12 +53,12 @@ const BANNED = [
   [/\b(skill|mastery) (has )?declined\b/i, 'nothing declined; we simply have not seen it lately'],
   [/\bno longer secure\b/i,             '`secure` stays `secure` while a revisit is suggested'],
   [/\bneeds? remediation\b/i,           'a revisit is an invitation, not a treatment plan'],
-  [/\boverdue\b/i,                      'an interval elapsing is not a deadline missed', /^(refresh|activity)\./],
+  [/\boverdue\b/i,                      'an interval elapsing is not a deadline missed', /^(refresh|activity|today)\./],
   [/\bregress(ed|ion|ing)\b/i,          'Nestra never asserts a child went backwards'],
   [/\bolvidando\b/i,                    'a gap in our records is not a claim about how a child remembers'],
   [/\bha disminuido\b/i,                'nothing declined; we simply have not seen it lately'],
   [/\bya no (es|est[áa]) seguro\b/i,    '`secure` stays `secure` while a revisit is suggested'],
-  [/\bvencid[oa]\b/i,                   'an interval elapsing is not a deadline missed', /^(refresh|activity)\./],
+  [/\bvencid[oa]\b/i,                   'an interval elapsing is not a deadline missed', /^(refresh|activity|today)\./],
   // STEP 7 phase 5. A diagnostic is where grade level tries hardest to come
   // back, because the whole genre it resembles is built on it. An item is never
   // a grade's item, a child is never too old or too young for one, and an
@@ -94,13 +94,13 @@ const BANNED = [
   // and banning the phrase outright would delete the sentence that makes the
   // promise. What must not happen is a path CLAIMING one, so the rule watches
   // the path keys.
-  [/\bmastery (level|percent)/i,        'a child is not a percentage', /^path\./],
+  [/\bmastery (level|percent)/i,        'a child is not a percentage', /^(path|today)\./],
   [/\bpr[óo]ximo grado\b/i,            'a path follows this child, not a grade sequence'],
   [/\ben el nivel de (su )?grado\b/i,  'there is no grade level in a child-paced path'],
   [/\besperado para (la edad|el grado)\b/i, 'nothing here is expected of a child by a date'],
   [/\bdestrezas? faltantes?\b/i,       'an absence of evidence is not a missing skill'],
   [/\bvac[íi]os? de conocimiento\b/i,  'a gap in our records is not a gap in a child'],
-  [/\bnivel de dominio\b/i,            'a child is not a percentage', /^path\./],
+  [/\bnivel de dominio\b/i,            'a child is not a percentage', /^(path|today)\./],
   [/\basignad[oa] a (tu|su) (hija|hijo)\b/i, 'Nestra proposes; it never assigns'],
   // STEP 8 phase 1. Two different ways this layer turns into school. The first
   // is homework: an activity that is owed, late, or failed, when the honest
@@ -123,7 +123,7 @@ const BANNED = [
   // described as obligatory, so the rule watches the copy where the subject is
   // a child's work rather than a text box. Ban the claim, not the word.
   [/\bmandatory\b/i,                    'nothing a family does with their own child is mandatory here',
-                                        /^(activity|path)\./],
+                                        /^(activity|path|today)\./],
   [/\bremediation\b/i,                  'a different way in is not a treatment plan'],
   [/\bfailed (the |this )?(activity|lesson|worksheet)\b/i,
                                         'an activity that did not happen is not a failure'],
@@ -138,9 +138,31 @@ const BANNED = [
                                         'Nestra proposes an activity; a family is never required to do one'],
   [/\b(tarea|actividad) asignada\b/i,   'Nestra proposes; it never assigns'],
   [/\bobligatori[oa]\b/i,               'nothing a family does with their own child is mandatory here',
-                                        /^(activity|path)\./],
+                                        /^(activity|path|today)\./],
   [/\bremediaci[óo]n\b/i,               'a different way in is not a treatment plan'],
   [/\btrabajo incompleto\b/i,           'a morning that went differently is not a debt'],
+  // STEP 8 phase 2. A screen called Today is the single most likely place in
+  // this product for school to come back, because a daily list is what a
+  // register looks like. The forbidden sentences are the ones that turn "some
+  // things you could work on" into "here is what you owe": anything late, any
+  // morning missed, and - the mirror image, which is just as much a comparison -
+  // anything "ahead".
+  [/\bahead of (schedule|grade|pace|her|his|their) /i,
+                                        'being "ahead" is the same comparison as being behind, wearing a smile'],
+  [/\blate\b/i,                         'a morning is not a deadline', /^(today|activity)\./],
+  [/\bmissed\b/i,                       'a day that went differently is not a day missed', /^(today|activity)\./],
+  [/\bdidn'?t finish\b/i,               '"we did some of it" is the same fact without the verdict'],
+  [/\bkeep up\b/i,                      'with whom?'],
+  [/\bon schedule\b/i,                  'there is no schedule a child is measured against'],
+  [/\bdays? (missed|skipped)\b/i,       'Nestra does not count days against a family'],
+  [/\badelantad[oa]\b/i,                'being "ahead" is the same comparison as being behind'],
+  [/\bal d[ií]a\b/i,                    'there is no schedule a child is measured against', /^(today|activity)\./],
+  // `más tarde` is "later", which is exactly the calm thing we want a family to
+  // be told - "come back later" is good copy. `está tarde` is a deadline claim.
+  // Ban the claim, not the word; the probes below hold both halves in place.
+  [/(?<!m[áa]s )\btarde\b/i,            'a morning is not a deadline', /^(today|activity)\./],
+  [/\bd[ií]as? perdidos?\b/i,           'Nestra does not count days against a family'],
+  [/\bno termin[óo]\b/i,                '"hicimos una parte" is the same fact without the verdict'],
   // Spanish - the same claims, which is the point of checking both catalogs
   [/\best[áa]ndar requerido\b/i,        'a standard is a reference, never a requirement'],
   [/\bdebe completar\b/i,               'nothing must be completed by a date'],
@@ -178,6 +200,14 @@ const MUST_BE_FLAGGED = [
   ['path.probe',     'Su nivel de dominio es 72%'],
   ['activity.probe', 'This activity is mandatory'],
   ['activity.probe', 'Esta actividad es obligatoria'],
+  ['today.probe',    'This activity is overdue'],
+  ['today.probe',    'Esta actividad está vencida'],
+  ['today.probe',    'Her mastery level is 72%'],
+  ['today.probe',    'Su nivel de dominio es 72%'],
+  ['today.probe',    'This one is late'],
+  ['today.probe',    'You missed this one'],
+  ['today.probe',    'Este está tarde'],
+  ['today.probe',    'Van al día'],
 ];
 
 function flag(key, value) {

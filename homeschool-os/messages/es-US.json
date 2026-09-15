@@ -1157,5 +1157,92 @@
       "anotherActivityIsAlreadyLiveOnThisStep": "Ya hay algo elegido para este paso. Aparta eso primero si prefieres retomar esta.",
       "reopeningMeansSelectedAvailableOrStarted": "Retomar algo significa volver a elegirlo o empezarlo."
     }
+  },
+  "today": {
+    "title": "Hoy",
+    "intro": "Algunas cosas en las que podrían trabajar. Nada de esto se debe, y pueden elegir algo diferente cuando quieran.",
+    "empty": "No hay nada pendiente. Es un día perfectamente normal.",
+    "notAChecklist": "Esto no es una lista que haya que terminar.",
+    "continue": "Continuar",
+    "start": "Empezar",
+    "finished": "Terminado",
+    "comeBackLater": "Volver más tarde",
+    "notToday": "Hoy no",
+    "chooseSomethingDifferent": "Elegir algo diferente",
+    "exploreInstead": "Explorar otra cosa",
+    "pin": "Poner esto primero hoy",
+    "unpin": "No dejarlo primero",
+    "hide": "Quitar esto de hoy",
+    "hideNote": "Fuera por hoy. Volverá mañana si todavía lo quieren.",
+    "pinned": "Primero hoy",
+    "pickedByYou": "Elegiste esto para hoy",
+    "aboutMinutes": "Unos {minutes} minutos",
+    "openIt": "Abrirlo",
+    "instructions": "Qué hacer",
+    "forGrownUps": "Para las personas adultas",
+    "why": {
+      "label": "¿Por qué está esto aquí?",
+      "approvedLearningPath": "Es el siguiente paso del plan que aprobaste",
+      "parentChoseIt": "Tú elegiste este",
+      "parentCreatedIt": "Tú misma escribiste este",
+      "revisitRequested": "Pediste volver a esto",
+      "continuingSomethingStarted": "Ya habían empezado este"
+    },
+    "session": {
+      "started": "Empezado",
+      "paused": "Apartado por ahora",
+      "resumed": "Retomando donde lo dejaron",
+      "ended": "Anotado",
+      "howDidItGo": "¿Cómo les fue?",
+      "howLong": "¿Cuánto tiempo tomó?",
+      "howLongUnknown": "No estoy segura, y no pasa nada",
+      "noteInvite": "¿Quieres añadir una nota?",
+      "childNotePrompt": "¿Qué notaste?",
+      "educatorNotePrompt": "Algo que valga la pena recordar: qué ayudó, qué probar después",
+      "notRequired": "No hace falta rellenar nada de esto.",
+      "outcome": {
+        "completed": "Lo terminamos",
+        "partiallyCompleted": "Hicimos una parte",
+        "explored": "Le echamos un vistazo",
+        "stopped": "Paramos",
+        "childWantsMore": "Quiere más de esto",
+        "revisitLater": "Volver a esto en otro momento"
+      },
+      "doneNote": "Eso queda anotado como lo que pasó. No dice nada sobre lo que tu hija ha aprendido."
+    },
+    "launch": {
+      "nestraHosted": "Se abre aquí en Nestra",
+      "externalLink": "Abre la página del proveedor",
+      "externalLinkNote": "Este es un enlace al sitio de otra persona. No es parte de Nestra, y Nestra no ve lo que pasa allí.",
+      "providerIntegrated": "Conectado con este proveedor",
+      "offline": "Lejos de una pantalla",
+      "noDigitalResource": "No hay nada que abrir: esto pasa lejos de una pantalla",
+      "notOpenableNow": "Ahora mismo no puedes abrir este"
+    },
+    "artifact": {
+      "add": "Añadir una foto",
+      "addFile": "Añadir un archivo",
+      "invite": "¿Quieren guardar algo de esto?",
+      "note": "Guardado con la actividad. Añadir una foto no es lo mismo que decir que muestra lo que tu hija puede hacer.",
+      "attached": "Añadido"
+    },
+    "evidence": {
+      "add": "Añadir evidencia de aprendizaje",
+      "invite": "¿Quieres guardar esto como evidencia?",
+      "optional": "Totalmente a tu criterio. Decir que no es una respuesta perfectamente buena.",
+      "accept": "Sí, guardarlo",
+      "decline": "No, eso fue solo práctica",
+      "accepted": "Guardado como evidencia de que este trabajo se relaciona con esa destreza.",
+      "acceptedNote": "Eso no dice que tu hija lo haya aprendido: lo que diga su perfil sigue siendo decisión tuya, aparte.",
+      "declined": "No se guardó. Nada cambia respecto a tu hija.",
+      "onlyAGuardianDecides": "Decidir qué cuenta como evidencia le corresponde a una persona tutora con acceso completo."
+    },
+    "history": {
+      "title": "Lo que pasó",
+      "occasions": "Veces que trabajaron en esto",
+      "noDuration": "Duración sin registrar",
+      "byChild": "Registrado por {name}",
+      "nothingChanged": "Nada de esto cambió lo que Nestra dice sobre tu hija."
+    }
   }
 }

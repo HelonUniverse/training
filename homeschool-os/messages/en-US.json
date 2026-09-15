@@ -1157,5 +1157,92 @@
       "anotherActivityIsAlreadyLiveOnThisStep": "There's already something chosen for this step. Set that one down first if you'd rather come back to this.",
       "reopeningMeansSelectedAvailableOrStarted": "Picking something back up means choosing it again or starting it."
     }
+  },
+  "today": {
+    "title": "Today",
+    "intro": "Some things you could work on. None of it is owed, and you can choose something different whenever you like.",
+    "empty": "Nothing waiting. That's a perfectly ordinary day.",
+    "notAChecklist": "This isn't a list you have to finish.",
+    "continue": "Continue",
+    "start": "Start",
+    "finished": "Finished",
+    "comeBackLater": "Come back later",
+    "notToday": "Not today",
+    "chooseSomethingDifferent": "Choose something different",
+    "exploreInstead": "Explore something else",
+    "pin": "Put this first today",
+    "unpin": "Don't keep this first",
+    "hide": "Take this off today",
+    "hideNote": "Off for today. It'll be back tomorrow if you still want it.",
+    "pinned": "First today",
+    "pickedByYou": "You picked this for today",
+    "aboutMinutes": "About {minutes} minutes",
+    "openIt": "Open it",
+    "instructions": "What to do",
+    "forGrownUps": "For grown-ups",
+    "why": {
+      "label": "Why is this here?",
+      "approvedLearningPath": "It's the next step on the plan you approved",
+      "parentChoseIt": "You chose this one",
+      "parentCreatedIt": "You wrote this one yourself",
+      "revisitRequested": "You asked to come back to this",
+      "continuingSomethingStarted": "You already started this one"
+    },
+    "session": {
+      "started": "Started",
+      "paused": "Set down for now",
+      "resumed": "Picking up where you left off",
+      "ended": "Written down",
+      "howDidItGo": "How did it go?",
+      "howLong": "How long did it take?",
+      "howLongUnknown": "Not sure — that's fine",
+      "noteInvite": "Want to add a note?",
+      "childNotePrompt": "What did you notice?",
+      "educatorNotePrompt": "Anything worth remembering — what helped, what to try next",
+      "notRequired": "You don't have to fill any of this in.",
+      "outcome": {
+        "completed": "We finished it",
+        "partiallyCompleted": "We did some of it",
+        "explored": "We had a look",
+        "stopped": "We stopped",
+        "childWantsMore": "They want more of this",
+        "revisitLater": "Come back to this another time"
+      },
+      "doneNote": "That's written down as what happened. It says nothing about what your child has learned."
+    },
+    "launch": {
+      "nestraHosted": "Opens here in Nestra",
+      "externalLink": "Opens the provider's own page",
+      "externalLinkNote": "This is a link to somebody else's site. It isn't part of Nestra, and Nestra doesn't see what happens there.",
+      "providerIntegrated": "Connected to this provider",
+      "offline": "Away from a screen",
+      "noDigitalResource": "Nothing to open — this one happens away from a screen",
+      "notOpenableNow": "You can't open this one right now"
+    },
+    "artifact": {
+      "add": "Add a photo",
+      "addFile": "Add a file",
+      "invite": "Want to keep something from this?",
+      "note": "Kept with the activity. Adding a photo isn't the same as saying it shows what your child can do.",
+      "attached": "Added"
+    },
+    "evidence": {
+      "add": "Add learning evidence",
+      "invite": "Would you like to keep this as evidence?",
+      "optional": "Entirely up to you. Saying no is a perfectly good answer.",
+      "accept": "Yes, keep it",
+      "decline": "No, that was just practice",
+      "accepted": "Kept as evidence that this work relates to that skill.",
+      "acceptedNote": "That isn't a statement that your child has learned it — what her profile says is still yours to decide, separately.",
+      "declined": "Not kept. Nothing about your child has changed.",
+      "onlyAGuardianDecides": "Deciding what counts as evidence is up to a guardian with full access."
+    },
+    "history": {
+      "title": "What happened",
+      "occasions": "Times worked on",
+      "noDuration": "Length not recorded",
+      "byChild": "Recorded by {name}",
+      "nothingChanged": "None of this changed what Nestra says about your child."
+    }
   }
 }
