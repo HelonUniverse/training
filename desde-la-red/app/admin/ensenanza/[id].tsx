@@ -9,7 +9,7 @@ import { Field, Options, SwitchRow, Tags } from '@/components/Form';
 import { Screen } from '@/components/Screen';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { useToast } from '@/components/Toast';
-import { deleteTeaching, saveTeaching, slugify } from '@/data/admin';
+import { deleteTeaching, generateTeaching, saveTeaching, slugify } from '@/data/admin';
 import { images, type ImageKey } from '@/data/images';
 import type { Teaching, TeachingBlock, TeachingTheme } from '@/data/types';
 import * as haptics from '@/lib/haptics';
@@ -75,6 +75,9 @@ export default function EnsenanzaEditorScreen() {
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [aiTopic, setAiTopic] = useState('');
+  const [generating, setGenerating] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
 
   const set = <K extends keyof Teaching>(key: K, value: Teaching[K]) =>
     setDraft((d) => ({ ...d, [key]: value }));
@@ -104,6 +107,42 @@ export default function EnsenanzaEditorScreen() {
       [body[i], body[j]] = [body[j], body[i]];
       return { ...d, body };
     });
+  };
+
+  const generate = async () => {
+    if (generating || !aiTopic.trim()) return;
+    haptics.tap();
+    setGenerating(true);
+    setAiError(null);
+
+    const guideName = guides.find((g) => g.id === draft.authorId)?.name;
+    const result = await generateTeaching({ topic: aiTopic.trim(), theme: draft.theme, guideName });
+    setGenerating(false);
+
+    if (!result.ok || !result.teaching) {
+      setAiError(result.message ?? 'No se pudo generar la enseñanza.');
+      haptics.warn();
+      return;
+    }
+
+    const { title, subtitle, excerpt, tags, body } = result.teaching;
+    const words = body.reduce((n, b) => n + b.text.split(/\s+/).filter(Boolean).length, 0);
+
+    setDraft((d) => ({
+      ...d,
+      title,
+      subtitle,
+      excerpt,
+      tags: tags.length ? tags : d.tags,
+      body,
+      // Minutos de lectura y de audio a partir de lo que escribió: ~200 y
+      // ~150 palabras por minuto. Quedan como punto de partida — se editan
+      // igual que cualquier otro campo.
+      readMinutes: Math.max(2, Math.round(words / 200)),
+      listenMinutes: Math.max(2, Math.round(words / 150)),
+    }));
+    haptics.success();
+    toast({ text: 'Borrador listo — revísalo antes de publicar', icon: 'zap' });
   };
 
   const problems = useMemo(() => {
@@ -167,6 +206,44 @@ export default function EnsenanzaEditorScreen() {
     <Screen padded={false} header={<ScreenHeader title={isNew ? 'Nueva enseñanza' : 'Editar'} />}>
       <View style={styles.head}>
         <Text style={styles.title}>{isNew ? 'Escribe para\nla Red' : draft.title || 'Sin título'}</Text>
+      </View>
+
+      <View style={styles.section}>
+        <Card glow accent="glow">
+          <View style={styles.aiHeader}>
+            <Feather name="zap" size={14} color={colors.glow} />
+            <Text style={styles.aiTitle}>Generar con IA</Text>
+          </View>
+          <Text style={styles.aiHelp}>
+            Dale un tema o unas palabras clave y Claude escribe el título, el resumen y el
+            cuerpo. Nada se publica solo: revisa y ajusta antes de guardar.
+          </Text>
+          <View style={styles.aiRow}>
+            <Field
+              label=""
+              value={aiTopic}
+              onChangeText={setAiTopic}
+              placeholder="Sobre soltar el control, por ejemplo"
+              editable={!generating}
+              style={styles.aiField}
+            />
+            <Button
+              label={generating ? 'Escribiendo…' : 'Generar'}
+              icon="zap"
+              size="md"
+              loading={generating}
+              disabled={generating || !aiTopic.trim()}
+              onPress={generate}
+            />
+          </View>
+          {aiError ? (
+            <Text style={styles.aiError}>{aiError}</Text>
+          ) : draft.body.some((b) => b.text.trim()) ? (
+            <Text style={styles.aiWarning}>
+              Ya hay texto en el cuerpo — generar lo reemplaza entero.
+            </Text>
+          ) : null}
+        </Card>
       </View>
 
       <View style={styles.form}>
@@ -357,6 +434,26 @@ function IconButton({
 const styles = StyleSheet.create({
   head: { paddingHorizontal: screenPadding, marginBottom: spacing.xl },
   title: { ...glowText, fontFamily: fonts.displayLight, fontSize: 29, lineHeight: 37, color: colors.text },
+
+  section: { paddingHorizontal: screenPadding, marginBottom: spacing.xl },
+  aiHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
+  aiTitle: { fontFamily: fonts.displaySemi, fontSize: 15, color: colors.text },
+  aiHelp: { fontFamily: fonts.body, fontSize: 12.5, lineHeight: 19, color: colors.textMuted },
+  aiRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 10, marginTop: spacing.md },
+  aiField: { flex: 1 },
+  aiWarning: {
+    fontFamily: fonts.body,
+    fontSize: 11.5,
+    color: colors.textMuted,
+    marginTop: spacing.sm,
+  },
+  aiError: {
+    fontFamily: fonts.body,
+    fontSize: 12,
+    lineHeight: 17,
+    color: colors.live,
+    marginTop: spacing.sm,
+  },
 
   form: { paddingHorizontal: screenPadding, gap: spacing.lg, marginBottom: spacing.xxl },
   pair: { flexDirection: 'row', gap: 12 },

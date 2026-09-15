@@ -79,12 +79,35 @@ where email = 'admin@heloniuminnovation.com';
 ```
 
 Con eso, esa persona ve el **Panel** en su Perfil: escribe y publica enseñanzas,
-da de alta guías y lee las reservas que llegan, sin tocar código. Los permisos
-los hace cumplir la base, no la interfaz: aunque alguien sin rol llegue a la ruta
-`/admin` a mano, Postgres rechaza cualquier escritura.
+da de alta guías, abre encuentros en vivo, pone servicios a reservar, ve quién
+está en la Red (y asciende o retira administradoras) y lee las reservas que
+llegan — todo sin tocar código. Los permisos los hace cumplir la base, no la
+interfaz: aunque alguien sin rol llegue a una ruta `/admin/...` a mano, Postgres
+rechaza cualquier escritura.
 
-Lo que el panel todavía no edita —círculos, encuentros en vivo y las preguntas de
-Mi Camino— se cambia desde el editor de SQL.
+Lo que el panel todavía no edita —círculos y las preguntas de Mi Camino— se
+cambia desde el editor de SQL.
+
+## 6 · Escribir enseñanzas con IA (opcional)
+
+Dentro del editor de una enseñanza hay un cuadro **Generar con IA**: se le da un
+tema y Claude escribe el título, el resumen, las etiquetas y el cuerpo. No
+publica nada sola — lo deja en el formulario para revisar y ajustar antes de
+guardar, igual que si lo hubiera escrito una persona.
+
+Esto corre en una función de Supabase (`generate-teaching`), no en la app, porque
+ahí es donde puede vivir la llave de Anthropic sin exponerla al público. Para
+encenderlo:
+
+1. Consigue una llave en **console.anthropic.com → API Keys** (empieza por `sk-ant-`)
+2. En el proyecto de Supabase → **Edge Functions → generate-teaching → Secrets**
+   → añade `ANTHROPIC_API_KEY` con esa llave
+3. Ya está — el botón funciona en cuanto guardes el secreto, sin volver a desplegar nada
+
+Solo lo puede usar quien tenga rol de administradora: la función comprueba
+`is_admin()` con la sesión de quien llama, igual que el resto del Panel. Cada
+enseñanza generada cuesta unos centavos de dólar (modelo Claude Opus 5); sin la
+llave puesta, el botón avisa con claridad en vez de fallar en silencio.
 
 ## Qué guarda cada tabla
 

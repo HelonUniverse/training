@@ -36,6 +36,7 @@ interface FieldProps {
   minHeight?: number;
   keyboardType?: 'default' | 'numeric';
   autoCapitalize?: 'none' | 'sentences' | 'words';
+  editable?: boolean;
   style?: StyleProp<ViewStyle>;
 }
 
@@ -49,6 +50,7 @@ export function Field({
   minHeight,
   keyboardType = 'default',
   autoCapitalize = 'sentences',
+  editable = true,
   style,
 }: FieldProps) {
   // Un campo largo que recorta el texto esconde justo lo que se escribe, así
@@ -78,10 +80,12 @@ export function Field({
         multiline={multiline}
         keyboardType={keyboardType}
         autoCapitalize={autoCapitalize}
+        editable={editable}
         onLayout={multiline ? (e) => setWidth(e.nativeEvent.layout.width) : undefined}
         style={[
           styles.input,
           multiline && { height, paddingTop: PADDING_Y, textAlignVertical: 'top' },
+          !editable && { opacity: 0.55 },
         ]}
         accessibilityLabel={label || placeholder}
       />

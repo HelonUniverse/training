@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase';
 
-import type { Guide, LiveEvent, Service, Teaching } from './types';
+import type { Guide, LiveEvent, Service, Teaching, TeachingBlock, TeachingTheme } from './types';
 
 /**
  * Escrituras del panel de administración. Todas pasan por las políticas de la
@@ -33,6 +33,65 @@ export function slugify(text: string, prefix: string): string {
     .slice(0, 5)
     .join('-');
   return `${prefix}-${base || Date.now().toString(36)}`;
+}
+
+/** Lo que devuelve la IA: material para el formulario, nada publicado. */
+export interface TeachingDraft {
+  title: string;
+  subtitle: string;
+  excerpt: string;
+  tags: string[];
+  body: TeachingBlock[];
+}
+
+export interface GenerateTeachingResult {
+  ok: boolean;
+  teaching?: TeachingDraft;
+  message?: string;
+}
+
+/**
+ * Le pide a Claude el borrador de una enseñanza. No toca la base de datos:
+ * el Panel pone el resultado en el formulario para que se revise antes de
+ * guardar, igual que si lo hubiera escrito una persona.
+ *
+ * La función vive en Supabase (edge function `generate-teaching`) porque ahí
+ * es donde está la llave de Anthropic — nunca en la app, que es pública.
+ */
+export async function generateTeaching(input: {
+  topic: string;
+  theme: TeachingTheme;
+  guideName?: string;
+}): Promise<GenerateTeachingResult> {
+  if (!supabase) return { ok: false, message: 'La base de datos todavía no está conectada.' };
+
+  const { data, error } = await supabase.functions.invoke('generate-teaching', {
+    body: input,
+  });
+
+  if (error) {
+    // Cuando la función respondió (así sea con un error), Supabase deja esa
+    // respuesta en `context` y ahí va nuestro mensaje en español. Un fallo de
+    // red trae un `context` que no es una Response — sin `.json()` — así que
+    // se comprueba antes de leerlo en vez de asumirlo.
+    let message: string | undefined;
+    try {
+      const ctx = (error as { context?: unknown }).context;
+      if (ctx && typeof (ctx as Response).json === 'function') {
+        const body = await (ctx as Response).json();
+        message = body?.error;
+      }
+    } catch {
+      // Nos quedamos con el mensaje genérico de abajo.
+    }
+    return { ok: false, message: message ?? 'No se pudo generar la enseñanza. Inténtalo otra vez.' };
+  }
+
+  if (!data?.teaching) {
+    return { ok: false, message: data?.error ?? 'No se pudo generar la enseñanza. Inténtalo otra vez.' };
+  }
+
+  return { ok: true, teaching: data.teaching as TeachingDraft };
 }
 
 export async function saveTeaching(t: Teaching): Promise<AdminResult> {
