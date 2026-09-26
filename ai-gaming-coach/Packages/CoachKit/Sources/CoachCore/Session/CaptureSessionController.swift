@@ -182,7 +182,7 @@ public final class CaptureSessionController: @unchecked Sendable {
             segmentCounter += 1
             return segmentCounter
         }
-        let name = String(format: "seg-%05d.mp4", id)
+        let name = String(format: "seg-%05ld.mp4", id)
         return (id, name, directory.segmentURL(name))
     }
 

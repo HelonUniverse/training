@@ -71,7 +71,7 @@ struct SessionSummaryView: View {
                 if manifest.videoPurged {
                     Label("Video deleted after the session (Don't Save Video).", systemImage: "eye.slash")
                 } else {
-                    LabeledContent("Kept at end", value: String(format: "%.0f s in %d segments", stats.rollingBufferSeconds, manifest.bufferedSegments.count))
+                    LabeledContent("Kept at end", value: String(format: "%.0f s in %ld segments", stats.rollingBufferSeconds, manifest.bufferedSegments.count))
                     NavigationLink("Play rolling buffer") {
                         SegmentListView(sessionID: manifest.id, segments: manifest.bufferedSegments)
                     }

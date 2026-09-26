@@ -41,7 +41,7 @@ struct DebugView: View {
             DebugRow("Frames processed", "\(stats.framesAnalyzed)")
             DebugRow("Skipped (throttle)", "\(stats.framesSkippedByThrottle)")
             DebugRow("Dropped", dropsDescription(stats))
-            DebugRow("Buffer duration", String(format: "%.1f s / %d segments", stats.rollingBufferSeconds, stats.rollingBufferSegments))
+            DebugRow("Buffer duration", String(format: "%.1f s / %ld segments", stats.rollingBufferSeconds, stats.rollingBufferSegments))
             DebugRow("Keyframes", "\(stats.keyframesSaved)")
             DebugRow("Video", "\(stats.videoWidth)×\(stats.videoHeight) · orient \(stats.videoOrientation)")
             DebugRow("Last luma", stats.lastFrameLuma.map { String(format: "%.3f", $0) } ?? "—")

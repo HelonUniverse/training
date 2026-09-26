@@ -114,15 +114,15 @@ public enum SessionTimeFormatter {
         let minutes = totalMillis / 60_000
         let secs = (totalMillis / 1000) % 60
         let millis = totalMillis % 1000
-        return String(format: "%02d:%02d.%03d", minutes, secs, millis)
+        return String(format: "%02ld:%02ld.%03ld", minutes, secs, millis)
     }
 
     /// `125` → `"2m 05s"`.
     public static func duration(_ seconds: Double) -> String {
         let total = Int(max(0, seconds).rounded())
         if total >= 3600 {
-            return String(format: "%dh %02dm %02ds", total / 3600, (total / 60) % 60, total % 60)
+            return String(format: "%ldh %02ldm %02lds", total / 3600, (total / 60) % 60, total % 60)
         }
-        return String(format: "%dm %02ds", total / 60, total % 60)
+        return String(format: "%ldm %02lds", total / 60, total % 60)
     }
 }
