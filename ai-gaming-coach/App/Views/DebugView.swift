@@ -34,6 +34,8 @@ struct DebugView: View {
         let heartbeatAge = model.now.timeIntervalSince(manifest.updatedAt)
         return Section("Capture") {
             DebugRow("Status", manifest.status.rawValue + (manifest.isLive(now: model.now) ? " (live)" : ""))
+            DebugRow("Provider", CaptureProviderKind(mechanism: manifest.source.mechanism).displayName)
+            DebugRow("Frames without image", (manifest.statistics.sourceFrameStatus ?? [:]).isEmpty ? "0" : (manifest.statistics.sourceFrameStatus ?? [:]).sorted { $0.key < $1.key }.map { "\($0.key) \($0.value)" }.joined(separator: ", "))
             DebugRow("Heartbeat age", String(format: "%.1f s", max(0, heartbeatAge)))
             DebugRow("FPS received", String(format: "%.1f (avg %.1f)", stats.receivedFPS, stats.averageReceivedFPS))
             DebugRow("FPS analysed", String(format: "%.1f (avg %.1f)", stats.analyzedFPS, stats.averageProcessingFPS))

@@ -25,11 +25,13 @@ jobs:
         working-directory: ai-gaming-coach/Packages/CoachKit
     steps:
       - uses: actions/checkout@v4
-      - run: swift build -Xswiftc -warnings-as-errors
+      - run: swift build --build-tests -Xswiftc -warnings-as-errors
       - run: swift test
 
+  # Oldest supported toolchain. The iOS 18 SDK has no iOS ScreenCaptureKit,
+  # so the ScreenCaptureKit provider compiles out and only ReplayKit ships.
   ios-build:
-    name: iOS app + broadcast extension (Xcode)
+    name: iOS build, Xcode 16 (ReplayKit only)
     runs-on: macos-15
     defaults:
       run:
@@ -43,21 +45,47 @@ jobs:
       - name: Show toolchain
         run: xcodebuild -version
       - name: Build for iOS device (unsigned)
-        run: |
-          set -o pipefail
-          xcodebuild build \
-            -project AIGamingCoach.xcodeproj \
-            -scheme AIGamingCoach \
-            -destination 'generic/platform=iOS' \
-            -derivedDataPath build \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
-            | tee xcodebuild.log | grep -E "error:|warning:|BUILD (SUCCEEDED|FAILED)" || true
-          grep -q "BUILD SUCCEEDED" xcodebuild.log
+        run: ../.github/scripts/xcodebuild-ios.sh
       - name: Check extension is embedded
-        run: |
-          app=$(find build/Build/Products -maxdepth 3 -name "AIGamingCoach.app" | head -1)
-          ls "$app/PlugIns"
-          /usr/libexec/PlistBuddy -c "Print :NSExtension" "$app/PlugIns/BroadcastExtension.appex/Info.plist"
+        run: ../.github/scripts/check-app-bundle.sh
       - name: CoachCore tests (macOS)
         working-directory: ai-gaming-coach/Packages/CoachKit
         run: swift test
+
+  # iOS 27 SDK: compiles the ScreenCaptureKit provider against Apple's
+  # real headers. Xcode 27 is a preview image on GitHub runners.
+  ios-build-sdk27:
+    name: iOS build, Xcode 27 (ReplayKit + ScreenCaptureKit)
+    runs-on: macos-26
+    defaults:
+      run:
+        working-directory: ai-gaming-coach
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode 27
+        run: |
+          ls -d /Applications/Xcode*.app
+          xcode=$(ls -d /Applications/Xcode_27*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$xcode" ]; then
+            echo "::error::No Xcode 27 on this runner image; the ScreenCaptureKit provider cannot be compiled."
+            exit 1
+          fi
+          sudo xcode-select -s "$xcode"
+          xcodebuild -version
+          xcodebuild -showsdks | grep -i iphoneos
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project
+        run: xcodegen generate
+      - name: Build for iOS device (unsigned)
+        run: ../.github/scripts/xcodebuild-ios.sh
+      - name: Check extension and ScreenCaptureKit provider are built
+        run: |
+          ../.github/scripts/check-app-bundle.sh
+          app=$(find build/Build/Products -maxdepth 3 -name "AIGamingCoach.app" | head -1)
+          /usr/libexec/PlistBuddy -c "Print :UIBackgroundModes" "$app/Info.plist"
+          # The provider must actually be compiled in, not #if'd out.
+          # (Debug builds put app code in AIGamingCoach.debug.dylib.)
+          find "$app" -maxdepth 1 -type f \( -name AIGamingCoach -o -name "*.debug.dylib" \) -print0 \
+            | xargs -0 nm 2>/dev/null | grep -q ScreenCaptureKitCaptureProvider \
+            || { echo "::error::ScreenCaptureKitCaptureProvider is missing from the binary"; exit 1; }

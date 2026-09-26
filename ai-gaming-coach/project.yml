@@ -33,6 +33,10 @@ targets:
     sources:
       - path: App
       - path: Shared
+      # Media components shared with the extension (rolling-buffer encoder,
+      # keyframes, frame probe), used by the in-app ScreenCaptureKit provider.
+      - path: BroadcastExtension/SegmentWriter.swift
+      - path: BroadcastExtension/KeyframeEncoder.swift
     dependencies:
       - package: CoachKit
         product: CoachCore
@@ -58,6 +62,11 @@ targets:
         UIRequiresFullScreen: true
         CoachAppGroupIdentifier: $(APP_GROUP_IDENTIFIER)
         CoachBroadcastExtensionBundleIdentifier: $(BUNDLE_ID_PREFIX).broadcast
+        # ScreenCaptureKit (iOS 27+): keeps full-display capture running while
+        # another app is in front. Older iOS versions ignore this value.
+        UIBackgroundModes:
+          - screen-capture
+        NSScreenCaptureUsageDescription: AI Gaming Coach analyses the gameplay you choose to share so it can coach you. Nothing is captured until you confirm in the system screen-sharing sheet.
     entitlements:
       path: App/AIGamingCoach.entitlements
       properties:

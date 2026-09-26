@@ -24,15 +24,29 @@ struct HomeView: View {
                             .font(.callout)
                     }
 
-                    StartCoachingButton(preferredExtension: model.extensionBundleID, isLive: model.isCaptureLive)
-                        .disabled(model.setupError != nil)
+                    CaptureProviderPanel()
+
+                    switch model.activeProvider {
+                    case .replayKit:
+                        StartCoachingButton(preferredExtension: model.extensionBundleID, isLive: model.isCaptureLive)
+                            .disabled(model.setupError != nil || model.inAppCaptureState != .idle)
+                    case .screenCaptureKit:
+                        InAppCaptureButton()
+                            .disabled(model.setupError != nil)
+                    }
+
+                    if let error = model.captureError {
+                        Label(error, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                            .font(.callout)
+                    }
 
                     StatusPanel()
 
                     if model.isCaptureLive, let live = model.latest {
                         CaptureActiveBanner(manifest: live, now: model.now)
                     } else {
-                        HowToCard()
+                        HowToCard(provider: model.activeProvider)
                     }
 
                     if let last = model.sessions.first(where: { $0.status == .finished || $0.status == .failed }) {
@@ -49,6 +63,10 @@ struct HomeView: View {
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     NavigationLink { DebugView() } label: { Image(systemName: "ladybug") }
                         .accessibilityLabel("Debug")
+                    #if DEBUG
+                    NavigationLink { ProviderComparisonView() } label: { Image(systemName: "rectangle.split.2x1") }
+                        .accessibilityLabel("Capture provider comparison")
+                    #endif
                     NavigationLink { SessionsView() } label: { Image(systemName: "list.bullet.rectangle") }
                         .accessibilityLabel("Sessions")
                     NavigationLink { SettingsView() } label: { Image(systemName: "gearshape") }
@@ -140,7 +158,7 @@ private struct CaptureActiveBanner: View {
             Label("Screen capture is active", systemImage: "record.circle.fill")
                 .font(.headline)
                 .foregroundStyle(.red)
-            Text("Everything on screen is being analysed until you stop the broadcast from the red status indicator or Control Center.")
+            Text("Everything on screen is being analysed until you stop capture from the red status indicator or Control Center\(manifest.source.mechanism == CaptureProviderKind.screenCaptureKit.rawValue ? ", or with Stop Coaching above" : "").")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
             let stats = manifest.statistics
@@ -170,14 +188,89 @@ struct MiniStat: View {
     }
 }
 
+/// Which capture provider Start Coaching uses. Shown on iOS 27+ only;
+/// earlier versions have ReplayKit alone.
+private struct CaptureProviderPanel: View {
+    @Environment(CoachModel.self) private var model
+
+    var body: some View {
+        @Bindable var model = model
+        if model.screenCaptureKitAvailable {
+            GroupBox {
+                Picker("Capture", selection: $model.providerChoice) {
+                    Text("ScreenCaptureKit").tag(CoachModel.ProviderChoice.screenCaptureKit)
+                    Text("ReplayKit").tag(CoachModel.ProviderChoice.replayKit)
+                }
+                .pickerStyle(.segmented)
+                .disabled(model.isCaptureLive || model.inAppCaptureState != .idle)
+                Text(model.providerChoice == .screenCaptureKit
+                     ? "Experimental · preferred test on iOS 27. Captures in this app; no broadcast extension."
+                     : "Broadcast Upload Extension. Works on iOS 17 and later.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } label: {
+                Text("Capture provider")
+            }
+        }
+    }
+}
+
+/// Start/stop for in-app ScreenCaptureKit capture. Starting presents
+/// Apple's content-sharing picker; nothing is captured until the user
+/// confirms there.
+private struct InAppCaptureButton: View {
+    @Environment(CoachModel.self) private var model
+
+    var body: some View {
+        let state = model.inAppCaptureState
+        Button {
+            switch state {
+            case .idle: model.startScreenCaptureKit()
+            case .running: model.stopScreenCaptureKit()
+            case .awaitingUser, .stopping: break
+            }
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: state == .running ? "stop.circle.fill" : "record.circle")
+                    .font(.title2)
+                Text(title(for: state))
+                    .font(.headline.weight(.heavy))
+                    .tracking(1.5)
+            }
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity, minHeight: 64)
+            .background(state == .running ? Color.red.gradient : Color.accentColor.gradient, in: Capsule())
+        }
+        .disabled(state == .awaitingUser || state == .stopping)
+    }
+
+    private func title(for state: CoachModel.InAppCaptureState) -> String {
+        switch state {
+        case .idle: return "START COACHING"
+        case .awaitingUser: return "WAITING FOR PERMISSION…"
+        case .running: return "STOP COACHING"
+        case .stopping: return "STOPPING…"
+        }
+    }
+}
+
 private struct HowToCard: View {
+    var provider: CoachModel.ProviderChoice
+
     var body: some View {
         GroupBox("How it works") {
             VStack(alignment: .leading, spacing: 8) {
                 step(1, "Tap Start Coaching.")
-                step(2, "In the iOS sheet, check that AI Gaming Coach is selected and tap Start Broadcast.")
+                if provider == .screenCaptureKit {
+                    step(2, "In Apple's screen-sharing sheet, choose to share the entire screen and confirm.")
+                } else {
+                    step(2, "In the iOS sheet, check that AI Gaming Coach is selected and tap Start Broadcast.")
+                }
                 step(3, "Open Fortnite and play normally. This app doesn't need to stay open.")
-                step(4, "When you're done, tap the red status indicator (or open Control Center) and stop the broadcast.")
+                step(4, provider == .screenCaptureKit
+                     ? "When you're done, come back and tap Stop Coaching, or stop sharing from the red status indicator or Control Center."
+                     : "When you're done, tap the red status indicator (or open Control Center) and stop the broadcast.")
                 step(5, "Come back here to see the session summary.")
             }
             .font(.callout)
