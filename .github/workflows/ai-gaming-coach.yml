@@ -1,0 +1,63 @@
+name: AI Gaming Coach
+
+on:
+  push:
+    paths:
+      - "ai-gaming-coach/**"
+      - ".github/workflows/ai-gaming-coach.yml"
+  pull_request:
+    paths:
+      - "ai-gaming-coach/**"
+      - ".github/workflows/ai-gaming-coach.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ai-gaming-coach-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core-linux:
+    name: CoachCore tests (Linux)
+    runs-on: ubuntu-latest
+    container: swift:6.0-jammy
+    defaults:
+      run:
+        working-directory: ai-gaming-coach/Packages/CoachKit
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift build -Xswiftc -warnings-as-errors
+      - run: swift test
+
+  ios-build:
+    name: iOS app + broadcast extension (Xcode)
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: ai-gaming-coach
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project
+        run: xcodegen generate
+      - name: Show toolchain
+        run: xcodebuild -version
+      - name: Build for iOS device (unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project AIGamingCoach.xcodeproj \
+            -scheme AIGamingCoach \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            | tee xcodebuild.log | grep -E "error:|warning:|BUILD (SUCCEEDED|FAILED)" || true
+          grep -q "BUILD SUCCEEDED" xcodebuild.log
+      - name: Check extension is embedded
+        run: |
+          app=$(find build/Build/Products -maxdepth 3 -name "AIGamingCoach.app" | head -1)
+          ls "$app/PlugIns"
+          /usr/libexec/PlistBuddy -c "Print :NSExtension" "$app/PlugIns/BroadcastExtension.appex/Info.plist"
+      - name: CoachCore tests (macOS)
+        working-directory: ai-gaming-coach/Packages/CoachKit
+        run: swift test
