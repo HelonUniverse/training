@@ -41,6 +41,7 @@ final class KeyframeEncoder {
         inFlight += 1
         lock.unlock()
 
+        let handoff = PixelBufferHandoff(buffer: pixelBuffer)
         queue.async { [self] in
             defer {
                 lock.lock()
@@ -48,7 +49,7 @@ final class KeyframeEncoder {
                 lock.unlock()
             }
             autoreleasepool {
-                var image = CIImage(cvPixelBuffer: pixelBuffer).oriented(orientation)
+                var image = CIImage(cvPixelBuffer: handoff.buffer).oriented(orientation)
                 let longest = max(image.extent.width, image.extent.height)
                 if longest > CGFloat(maxDimension) {
                     let scale = CGFloat(maxDimension) / longest
@@ -73,6 +74,13 @@ final class KeyframeEncoder {
         }
         return true
     }
+}
+
+/// Moves a pixel buffer to another queue. `CVPixelBuffer` isn't `Sendable`;
+/// this is safe because the receiving queue only reads the pixels and the
+/// sender doesn't touch the buffer after the hand-off.
+struct PixelBufferHandoff: @unchecked Sendable {
+    let buffer: CVPixelBuffer
 }
 
 /// Cheapest possible proof that analysis sees real pixels: mean luminance
