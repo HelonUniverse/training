@@ -141,7 +141,7 @@ Nada de lo implementado interactúa con Fortnite, lee su memoria ni automatiza c
 
 | # | Criterio | Implementación | Estado |
 |---|---|---|---|
-| 1 | El proyecto compila | `project.yml` + CI macOS (`xcodebuild`, sin firma) | Pendiente del resultado de CI |
+| 1 | El proyecto compila | `project.yml` + CI macOS (`xcodebuild`, sin firma) | ✅ Compila con Xcode 16.4 (iOS, sin firma); extensión embebida verificada |
 | 2 | La app funciona | `App/` (Home, Summary, Debug, Settings, Sessions) | Requiere dispositivo |
 | 3 | La Broadcast Upload Extension funciona | `BroadcastExtension/` | Requiere dispositivo |
 | 4–5 | Start Coaching → hoja oficial de iOS | `StartCoachingButton` / `BroadcastPicker` | Requiere dispositivo |
