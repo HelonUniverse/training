@@ -120,5 +120,5 @@ La recomendación final **no se emitirá hasta tener datos de ambos**.
 ## 8. Compilación
 
 - **Xcode 16 / SDK de iOS 18** (job `ios-build`): el SDK no incluye ScreenCaptureKit para iOS, así que el proveedor se excluye con `#if canImport(ScreenCaptureKit)` y la app funciona solo con ReplayKit.
-- **Xcode 27 / SDK de iOS 27** (job `ios-build-sdk27`, runner `macos-26`): compila el proveedor contra las cabeceras reales de Apple y comprueba que el símbolo `ScreenCaptureKitCaptureProvider` está en el binario.
+- **Xcode 27 / SDK de iOS 27** (job `ios-build-sdk27`, imagen preview `xcode-27` de GitHub): compila el proveedor contra las cabeceras reales de Apple y comprueba que el símbolo `ScreenCaptureKitCaptureProvider` está en el binario y que `UIBackgroundModes` incluye `screen-capture`. Primer resultado (26‑09‑2026, Xcode 27.2, SDK iphoneos27.2): **BUILD SUCCEEDED, 0 warnings en el código del proyecto**.
 - Ambos jobs fallan si aparece cualquier warning en el código del proyecto.

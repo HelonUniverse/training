@@ -65,7 +65,7 @@ jobs:
       - name: Select Xcode 27
         run: |
           ls -d /Applications/Xcode*.app
-          xcode=$(ls -d /Applications/Xcode_27*.app /Applications/Xcode-27*.app 2>/dev/null | sort -V | tail -1)
+          xcode=$(ls -d /Applications/Xcode_27*.app /Applications/Xcode-27*.app 2>/dev/null | grep -vi beta | sort -V | tail -1)
           if [ -z "$xcode" ] && xcodebuild -version | grep -q "^Xcode 27"; then
             xcode=$(xcode-select -p | sed 's|/Contents/Developer||')
           fi
