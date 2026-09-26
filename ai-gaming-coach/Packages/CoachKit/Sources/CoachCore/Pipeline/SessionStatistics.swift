@@ -13,6 +13,9 @@ public enum FrameDropReason: String, Codable, CaseIterable, Sendable {
     case analysisBusy
     /// Too many keyframes were already being encoded.
     case keyframeBusy
+    /// The capture provider produced frames faster than the pipeline took
+    /// them; the provider's hand-off buffer replaced an unprocessed frame.
+    case pipelineBackpressure
 }
 
 public enum AudioSourceKind: String, Codable, Sendable {
@@ -57,6 +60,37 @@ public struct SessionStatistics: Codable, Hashable, Sendable {
     /// Failed writes to the shared container (disk full, container missing).
     public var storageErrors: Int64 = 0
 
+    // Device-validation metrics. Optional so that manifests written by
+    // earlier builds still decode (synthesized Codable skips missing
+    // optionals). nil means "not measured", never zero.
+
+    /// Physical memory footprint of the process hosting the pipeline
+    /// (the broadcast extension for ReplayKit, the app for ScreenCaptureKit).
+    public var memoryFootprintBytes: Int64?
+    public var peakMemoryFootprintBytes: Int64?
+    public var memoryFootprintSampleSum: Double?
+    public var memoryFootprintSamples: Int64?
+    /// CPU use of the hosting process; 100 = one core fully busy.
+    public var cpuPercent: Double?
+    public var peakCPUPercent: Double?
+    public var cpuPercentSampleSum: Double?
+    public var cpuSamples: Int64?
+    public var thermalState: ThermalState?
+    public var worstThermalState: ThermalState?
+    /// Seconds from a frame's presentation time to the moment the pipeline
+    /// started processing it. Only recorded when the source uses the host
+    /// clock; implausible values are counted in `captureLatencyOutOfRange`.
+    public var lastCaptureLatency: Double?
+    public var maxCaptureLatency: Double?
+    public var captureLatencySum: Double?
+    public var captureLatencySamples: Int64?
+    public var captureLatencyOutOfRange: Int64?
+    public var rollingBufferBytes: Int64?
+    public var peakRollingBufferBytes: Int64?
+    /// Frames the source delivered without image content, by source status
+    /// (ScreenCaptureKit: idle, blank, suspended…). Not counted as received.
+    public var sourceFrameStatus: [String: Int64]?
+
     public init() {}
 
     public var droppedFrames: Int64 { drops.values.reduce(0, +) }
@@ -76,6 +110,65 @@ public struct SessionStatistics: Codable, Hashable, Sendable {
 
     public var averageAnalysisMilliseconds: Double {
         framesAnalyzed > 0 ? totalAnalysisSeconds / Double(framesAnalyzed) * 1000 : 0
+    }
+
+    public var droppedPercent: Double {
+        videoFramesReceived > 0 ? Double(droppedFrames) / Double(videoFramesReceived) * 100 : 0
+    }
+
+    /// Share of analysed frames that were near-black. nil when no frame
+    /// could be probed (unsupported pixel format), so it never reads as 0 %.
+    public var blackFramePercent: Double? {
+        guard framesAnalyzed > 0, lastFrameLuma != nil else { return nil }
+        return Double(nearBlackFrames) / Double(framesAnalyzed) * 100
+    }
+
+    public var averageMemoryFootprintBytes: Double? {
+        guard let sum = memoryFootprintSampleSum, let count = memoryFootprintSamples, count > 0 else { return nil }
+        return sum / Double(count)
+    }
+
+    public var averageCPUPercent: Double? {
+        guard let sum = cpuPercentSampleSum, let count = cpuSamples, count > 0 else { return nil }
+        return sum / Double(count)
+    }
+
+    public var averageCaptureLatency: Double? {
+        guard let sum = captureLatencySum, let count = captureLatencySamples, count > 0 else { return nil }
+        return sum / Double(count)
+    }
+
+    mutating func record(_ sample: ProcessMetricsSample) {
+        if let bytes = sample.memoryFootprintBytes {
+            memoryFootprintBytes = bytes
+            peakMemoryFootprintBytes = max(peakMemoryFootprintBytes ?? 0, bytes)
+            memoryFootprintSampleSum = (memoryFootprintSampleSum ?? 0) + Double(bytes)
+            memoryFootprintSamples = (memoryFootprintSamples ?? 0) + 1
+        }
+        if let cpu = sample.cpuPercent {
+            cpuPercent = cpu
+            peakCPUPercent = max(peakCPUPercent ?? 0, cpu)
+            cpuPercentSampleSum = (cpuPercentSampleSum ?? 0) + cpu
+            cpuSamples = (cpuSamples ?? 0) + 1
+        }
+        if let thermal = sample.thermalState {
+            thermalState = thermal
+            worstThermalState = max(worstThermalState ?? thermal, thermal)
+        }
+    }
+
+    /// Latencies above this are treated as clock mismatches, not delays.
+    public static let plausibleLatencyRange: ClosedRange<Double> = 0...2
+
+    mutating func recordLatency(_ latency: Double) {
+        guard Self.plausibleLatencyRange.contains(latency) else {
+            captureLatencyOutOfRange = (captureLatencyOutOfRange ?? 0) + 1
+            return
+        }
+        lastCaptureLatency = latency
+        maxCaptureLatency = max(maxCaptureLatency ?? 0, latency)
+        captureLatencySum = (captureLatencySum ?? 0) + latency
+        captureLatencySamples = (captureLatencySamples ?? 0) + 1
     }
 }
 

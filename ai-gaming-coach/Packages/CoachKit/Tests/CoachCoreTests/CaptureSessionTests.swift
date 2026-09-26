@@ -7,6 +7,7 @@ final class CaptureSessionTests: XCTestCase {
     private var root: URL!
     private var store: SessionStore!
     private let clock = TestClock()
+    private let metrics = TestMetrics()
 
     override func setUpWithError() throws {
         root = FileManager.default.temporaryDirectory.appendingPathComponent("coach-tests-\(UUID().uuidString)")
@@ -26,7 +27,9 @@ final class CaptureSessionTests: XCTestCase {
         let controller = CaptureSessionController(
             store: store, gameID: "fortnite",
             source: CaptureSourceInfo(platform: "test", mechanism: "unit-test"),
-            settings: settings, now: { [clock] in clock.now }
+            settings: settings, now: { [clock] in clock.now },
+            metricsSampler: { [metrics] in metrics.next() },
+            hostClock: { [clock] in clock.host }
         )
         try controller.start()
         return controller
@@ -198,4 +201,13 @@ final class CaptureSessionTests: XCTestCase {
 
 final class TestClock: @unchecked Sendable {
     var now = Date(timeIntervalSince1970: 1_000_000)
+    /// Host clock for latency; nil = not measurable.
+    var host: Double?
+}
+
+final class TestMetrics: @unchecked Sendable {
+    var samples: [ProcessMetricsSample] = []
+    func next() -> ProcessMetricsSample {
+        samples.isEmpty ? ProcessMetricsSample() : samples.removeFirst()
+    }
 }

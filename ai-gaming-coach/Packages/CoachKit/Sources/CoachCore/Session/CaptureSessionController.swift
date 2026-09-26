@@ -30,6 +30,8 @@ public final class CaptureSessionController: @unchecked Sendable {
 
     private let store: SessionStore
     private let now: @Sendable () -> Date
+    private let metricsSampler: @Sendable () -> ProcessMetricsSample
+    private let hostClock: @Sendable () -> Double?
     private let fileManager: FileManager
     private let lock = NSLock()
     private let ioQueue = DispatchQueue(label: "coach.capture.io", qos: .utility)
@@ -59,12 +61,16 @@ public final class CaptureSessionController: @unchecked Sendable {
         source: CaptureSourceInfo,
         settings: CaptureSettings,
         fileManager: FileManager = .default,
-        now: @escaping @Sendable () -> Date = { Date() }
+        now: @escaping @Sendable () -> Date = { Date() },
+        metricsSampler: @escaping @Sendable () -> ProcessMetricsSample = { ProcessMetrics.sample() },
+        hostClock: @escaping @Sendable () -> Double? = { HostClock.now() }
     ) {
         let settings = settings.sanitized()
         let manifest = SessionManifest(gameID: gameID, createdAt: now(), source: source, settings: settings)
         self.store = store
         self.now = now
+        self.metricsSampler = metricsSampler
+        self.hostClock = hostClock
         self.fileManager = fileManager
         self.manifest = manifest
         self.directory = store.directory(for: manifest.id)
@@ -86,6 +92,7 @@ public final class CaptureSessionController: @unchecked Sendable {
     // MARK: Frames
 
     public func videoFrame(pts: Double, width: Int, height: Int, orientation: Int) -> FrameDecision {
+        let hostNow = hostClock()
         let (decision, formatEvent) = locked { () -> (FrameDecision, MatchEvent?) in
             if originPTS == nil { originPTS = pts }
             let time = max(0, pts - (originPTS ?? pts))
@@ -98,6 +105,7 @@ public final class CaptureSessionController: @unchecked Sendable {
             receivedMeter.record(at: time)
             stats.receivedFPS = receivedMeter.rate(at: time)
             stats.analyzedFPS = analyzedMeter.rate(at: time)
+            if let hostNow { stats.recordLatency(hostNow - pts) }
 
             var formatEvent: MatchEvent?
             if stats.videoWidth != width || stats.videoHeight != height || stats.videoOrientation != orientation {
@@ -145,6 +153,16 @@ public final class CaptureSessionController: @unchecked Sendable {
             analyzedMeter.record(at: sessionTime)
             stats.analyzedFPS = analyzedMeter.rate(at: max(sessionTime, lastSessionTime))
             manifest.statistics = stats
+        }
+    }
+
+    /// A frame the source delivered without image content (for example a
+    /// ScreenCaptureKit `idle` or `blank` frame). Not a received frame.
+    public func sourceFrameSkipped(status: String) {
+        locked {
+            var counts = manifest.statistics.sourceFrameStatus ?? [:]
+            counts[status, default: 0] += 1
+            manifest.statistics.sourceFrameStatus = counts
         }
     }
 
@@ -204,6 +222,9 @@ public final class CaptureSessionController: @unchecked Sendable {
             stats.bytesEncoded += byteCount
             stats.rollingBufferSeconds = buffer.bufferedDuration
             stats.rollingBufferSegments = buffer.segments.count
+            let bufferBytes = buffer.segments.reduce(Int64(0)) { $0 + $1.byteCount }
+            stats.rollingBufferBytes = bufferBytes
+            stats.peakRollingBufferBytes = max(stats.peakRollingBufferBytes ?? 0, bufferBytes)
             manifest.statistics = stats
             manifest.bufferedSegments = buffer.segments
             manifest.preservedClips.append(contentsOf: update.completedClips)
@@ -384,7 +405,23 @@ public final class CaptureSessionController: @unchecked Sendable {
             lastManifestWrite = current
             return true
         }
-        if due { flush() }
+        guard due else { return }
+        sampleProcessMetrics()
+        flush()
+    }
+
+    /// Records memory, CPU and thermal state; emits an event when the
+    /// thermal state changes. Runs at the manifest cadence (1 Hz).
+    private func sampleProcessMetrics() {
+        let sample = metricsSampler()
+        let event: MatchEvent? = locked {
+            let previous = manifest.statistics.thermalState
+            manifest.statistics.record(sample)
+            guard let current = sample.thermalState, let previous, current != previous else { return nil }
+            return MatchEvent(timestamp: lastSessionTime, wallClock: now(), type: .thermalStateChanged, confidence: 1, origin: .pipeline,
+                              metadata: ["from": previous.rawValue, "to": current.rawValue])
+        }
+        if let event { record(event) }
     }
 
     public func flush() {

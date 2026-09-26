@@ -151,20 +151,8 @@ Nada de lo implementado interactúa con Fortnite, lee su memoria ni automatiza c
 | 11 | Keyframes periódicos | `KeyframeScheduler` + `KeyframeEncoder` | Lógica probada |
 | 12 | Session Summary | duración, frames recibidos/procesados, keyframes, drops, FPS medio de procesamiento | Probado (datos); UI requiere dispositivo |
 
-### Checklist para la primera prueba en iPhone
+### Prueba en iPhone
 
-1. `brew install xcodegen && xcodegen generate` en `ai-gaming-coach/`, abrir el proyecto y poner tu `DEVELOPMENT_TEAM` en `project.yml`. Si hace falta, cambiar `BUNDLE_ID_PREFIX` y `APP_GROUP_IDENTIFIER` para que coincidan con tu cuenta.
-2. Ejecutar en el iPhone y pulsar **Start Coaching**: debe aparecer la hoja del sistema con *AI Gaming Coach* preseleccionado. Pulsar *Start Broadcast*.
-3. En Home deben aparecer "Screen capture: Connected" y el banner rojo de captura activa.
-4. Abrir Fortnite y jugar 2–3 minutos. Observar si el juego pierde fluidez o se calienta más de lo normal.
-5. Parar desde el indicador rojo o el Centro de Control y volver a la app. Debe aparecer el **Session Summary** automáticamente.
-6. Comprobar en el summary o en Debug:
-   - FPS recibidos (esperable: 30–60; ReplayKit solo envía frames cuando cambia la pantalla);
-   - `nearBlackFrames` ≈ 0 (si no, hay protección de contenido);
-   - memoria mínima disponible por encima de ~10 MB;
-   - drops por motivo;
-   - keyframes con imágenes de Fortnite en horizontal;
-   - reproducir el buffer circular.
-7. Activar *Don't Save Video* y repetir: al terminar no debe quedar ningún `.mp4`.
+El procedimiento completo, los 18 puntos a registrar y el formato **DEVICE TEST RESULT** están en [`DEVICE_TEST.md`](DEVICE_TEST.md). La app genera ese bloque desde *Session Summary → Device test result*.
 
 Solo con esa prueba superada se pasa al Milestone 2 (HUD, salud, escudo, inventario y slot seleccionado, con overlay de debug).

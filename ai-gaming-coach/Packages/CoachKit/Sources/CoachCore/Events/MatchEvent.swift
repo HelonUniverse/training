@@ -32,6 +32,9 @@ public extension MatchEventType {
     static let videoFormatChanged: MatchEventType = "videoFormatChanged"
     static let clipPreserved: MatchEventType = "clipPreserved"
     static let memoryPressure: MatchEventType = "memoryPressure"
+    static let thermalStateChanged: MatchEventType = "thermalStateChanged"
+    /// A capture provider changed state (picker shown, stream interrupted…).
+    static let captureSourceStatus: MatchEventType = "captureSourceStatus"
 }
 
 // MARK: - Gameplay events (produced by game adapters from Milestone 2 onward)

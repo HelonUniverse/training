@@ -16,6 +16,7 @@ public struct SessionDirectory: Hashable, Sendable {
     public var manifestURL: URL { url.appendingPathComponent("manifest.json") }
     public var eventsURL: URL { url.appendingPathComponent("events.jsonl") }
     public var keyframeIndexURL: URL { url.appendingPathComponent("keyframes.jsonl") }
+    public var deviceTestNotesURL: URL { url.appendingPathComponent("device-test.json") }
     public var keyframesURL: URL { url.appendingPathComponent("keyframes", isDirectory: true) }
     public var segmentsURL: URL { url.appendingPathComponent("segments", isDirectory: true) }
     public var preservedURL: URL { url.appendingPathComponent("preserved", isDirectory: true) }
@@ -131,6 +132,23 @@ public final class SessionStore: @unchecked Sendable {
         guard let data = try? Data(contentsOf: url) else { return [] }
         // A line still being appended fails to decode and is skipped.
         return data.split(separator: 0x0A).compactMap { try? decoder.decode(T.self, from: Data($0)) }
+    }
+
+    // MARK: Device testing
+
+    public func deviceTestNotes(for id: UUID) -> DeviceTestNotes {
+        guard let data = try? Data(contentsOf: directory(for: id).deviceTestNotesURL),
+              let notes = try? decoder.decode(DeviceTestNotes.self, from: data)
+        else { return DeviceTestNotes() }
+        return notes
+    }
+
+    public func save(_ notes: DeviceTestNotes, for id: UUID) throws {
+        try encoder.encode(notes).write(to: directory(for: id).deviceTestNotesURL, options: .atomic)
+    }
+
+    public func deviceTestReport(for id: UUID, now: Date = Date()) throws -> DeviceTestReport {
+        DeviceTestReport(manifest: try manifest(for: id), notes: deviceTestNotes(for: id), now: now)
     }
 
     // MARK: Privacy

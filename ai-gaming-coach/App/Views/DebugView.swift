@@ -48,6 +48,12 @@ struct DebugView: View {
             DebugRow("Near-black frames", "\(stats.nearBlackFrames)")
             DebugRow("Analysis time", String(format: "avg %.2f ms · max %.2f ms", stats.averageAnalysisMilliseconds, stats.maxAnalysisSeconds * 1000))
             DebugRow("Memory headroom", memoryDescription(stats))
+            DebugRow("Memory footprint", MetricFormat.memory(peak: stats.peakMemoryFootprintBytes, average: stats.averageMemoryFootprintBytes, current: stats.memoryFootprintBytes))
+            DebugRow("CPU", MetricFormat.cpu(average: stats.averageCPUPercent, peak: stats.peakCPUPercent, current: stats.cpuPercent))
+            DebugRow("Thermal", MetricFormat.thermal(worst: stats.worstThermalState, current: stats.thermalState))
+            DebugRow("Capture latency", MetricFormat.latency(average: stats.averageCaptureLatency, max: stats.maxCaptureLatency, current: stats.lastCaptureLatency))
+            DebugRow("Black frames", stats.blackFramePercent.map { String(format: "%.2f %%", $0) } ?? "—")
+            DebugRow("Buffer on disk", stats.rollingBufferBytes.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? "—")
             DebugRow("Audio app / mic", "\(stats.audioAppSamples) / \(stats.audioMicSamples)")
             DebugRow("Storage errors", "\(stats.storageErrors)")
         }

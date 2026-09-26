@@ -141,4 +141,17 @@ final class CoachModel {
     }
 
     func diskUsage(for id: UUID) -> Int64 { store?.diskUsage(for: id) ?? 0 }
+
+    // MARK: Device testing
+
+    func deviceTestNotes(for id: UUID) -> DeviceTestNotes { store?.deviceTestNotes(for: id) ?? DeviceTestNotes() }
+
+    func saveDeviceTestNotes(_ notes: DeviceTestNotes, for id: UUID) {
+        try? store?.save(notes, for: id)
+    }
+
+    func deviceTestReport(for id: UUID, notes: DeviceTestNotes) -> DeviceTestReport? {
+        guard let manifest = sessions.first(where: { $0.id == id }) else { return nil }
+        return DeviceTestReport(manifest: manifest, notes: notes, now: now)
+    }
 }

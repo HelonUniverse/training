@@ -51,7 +51,11 @@ struct SessionSummaryView: View {
                 }
                 LabeledContent("Avg analysis time", value: String(format: "%.2f ms", stats.averageAnalysisMilliseconds))
                 LabeledContent("Video", value: "\(stats.videoWidth)×\(stats.videoHeight), orientation \(stats.videoOrientation)")
-                LabeledContent("Near-black frames", value: "\(stats.nearBlackFrames)")
+                LabeledContent("Near-black frames", value: stats.blackFramePercent.map { String(format: "%lld (%.2f %%)", stats.nearBlackFrames, $0) } ?? "not measured")
+                LabeledContent("Peak / avg memory", value: MetricFormat.memory(peak: stats.peakMemoryFootprintBytes, average: stats.averageMemoryFootprintBytes))
+                LabeledContent("CPU avg / peak", value: MetricFormat.cpu(average: stats.averageCPUPercent, peak: stats.peakCPUPercent))
+                LabeledContent("Thermal (worst / end)", value: MetricFormat.thermal(worst: stats.worstThermalState, current: stats.thermalState))
+                LabeledContent("Capture latency avg / max", value: MetricFormat.latency(average: stats.averageCaptureLatency, max: stats.maxCaptureLatency))
                 LabeledContent("Audio samples (app / mic)", value: "\(stats.audioAppSamples) / \(stats.audioMicSamples)")
                 if let minimum = stats.minimumMemoryAvailableBytes {
                     LabeledContent("Lowest memory headroom", value: ByteCountFormatter.string(fromByteCount: minimum, countStyle: .memory))
@@ -68,6 +72,7 @@ struct SessionSummaryView: View {
             Section {
                 LabeledContent("Segments written / evicted", value: "\(stats.segmentsWritten) / \(stats.segmentsEvicted)")
                 LabeledContent("Encoded", value: ByteCountFormatter.string(fromByteCount: stats.bytesEncoded, countStyle: .file))
+                LabeledContent("Buffer on disk (peak)", value: stats.peakRollingBufferBytes.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? "not measured")
                 if manifest.videoPurged {
                     Label("Video deleted after the session (Don't Save Video).", systemImage: "eye.slash")
                 } else {
@@ -89,6 +94,12 @@ struct SessionSummaryView: View {
                 } else {
                     KeyframeGrid(sessionID: manifest.id)
                 }
+            }
+
+            Section {
+                NavigationLink("Device test result") { DeviceTestReportView(sessionID: manifest.id) }
+            } footer: {
+                Text("Record the physical-device checklist for this session and copy it as one block.")
             }
 
             Section("Timeline") {
