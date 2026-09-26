@@ -53,10 +53,10 @@ jobs:
         run: swift test
 
   # iOS 27 SDK: compiles the ScreenCaptureKit provider against Apple's
-  # real headers. Xcode 27 is a preview image on GitHub runners.
+  # real headers. Xcode 27 is a public-preview runner image ("xcode-27").
   ios-build-sdk27:
     name: iOS build, Xcode 27 (ReplayKit + ScreenCaptureKit)
-    runs-on: macos-26
+    runs-on: xcode-27
     defaults:
       run:
         working-directory: ai-gaming-coach
@@ -65,7 +65,10 @@ jobs:
       - name: Select Xcode 27
         run: |
           ls -d /Applications/Xcode*.app
-          xcode=$(ls -d /Applications/Xcode_27*.app 2>/dev/null | sort -V | tail -1)
+          xcode=$(ls -d /Applications/Xcode_27*.app /Applications/Xcode-27*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$xcode" ] && xcodebuild -version | grep -q "^Xcode 27"; then
+            xcode=$(xcode-select -p | sed 's|/Contents/Developer||')
+          fi
           if [ -z "$xcode" ]; then
             echo "::error::No Xcode 27 on this runner image; the ScreenCaptureKit provider cannot be compiled."
             exit 1
