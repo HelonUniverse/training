@@ -41,7 +41,7 @@ Qué significa para nosotros:
 - **No lo he verificado en dispositivo.** Tampoco sé cuánto tiempo mantiene iOS el stream mientras otra app (Fortnite) ocupa el primer plano, ni qué condiciones de App Review aplican al modo de background `screen-capture`. Antes de apostar por esa vía habría que prototiparla en un iPhone con iOS 27.
 - La arquitectura ya lo permite: todo lo que no es "mover píxeles" está en `CaptureSessionController` (CoachCore). Una fuente `ScreenCaptureKitSource` en la app reutilizaría controlador, almacén, buffer, timeline y estadísticas sin cambios.
 
-**Decisión pendiente para el propietario del producto:** ¿añadimos después del Milestone 1 una segunda fuente de captura con ScreenCaptureKit para iOS 27+, manteniendo ReplayKit para iOS 17–26?
+**Decisión tomada:** ReplayKit se mantiene como proveedor de compatibilidad y se añade ScreenCaptureKit como proveedor experimental para iOS 27+, detrás del contrato común `GameplayCaptureProvider`. La elección final entre ambos se hará con datos de dispositivo. Ver [`MILESTONE_1_5.md`](MILESTONE_1_5.md).
 
 ## 3. Targets y carpetas
 
