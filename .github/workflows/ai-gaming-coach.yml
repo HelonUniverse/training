@@ -28,29 +28,54 @@ jobs:
       - run: swift build --build-tests -Xswiftc -warnings-as-errors
       - run: swift test
 
+  # Each iOS job builds the committed AIGamingCoach.xcodeproj exactly as a
+  # tester opens it (no XcodeGen), signing disabled.
+
   # Oldest supported toolchain. The iOS 18 SDK has no iOS ScreenCaptureKit,
   # so the ScreenCaptureKit provider compiles out and only ReplayKit ships.
   ios-build:
-    name: iOS build, Xcode 16 (ReplayKit only)
+    name: iOS build, Xcode 16 (ReplayKit only) + project sync check
     runs-on: macos-15
     defaults:
       run:
         working-directory: ai-gaming-coach
     steps:
       - uses: actions/checkout@v4
-      - name: Install XcodeGen
-        run: brew install xcodegen
-      - name: Generate project
-        run: xcodegen generate
       - name: Show toolchain
         run: xcodebuild -version
       - name: Build for iOS device (unsigned)
         run: ../.github/scripts/xcodebuild-ios.sh
       - name: Check extension is embedded
         run: ../.github/scripts/check-app-bundle.sh
+      - name: Committed project matches project.yml
+        run: |
+          brew install xcodegen
+          rm -rf build xcodebuild.log
+          xcodegen generate
+          git status --porcelain -- .
+          git diff --exit-code -- . \
+            || { echo "::error::AIGamingCoach.xcodeproj is out of date. Run 'xcodegen generate' in ai-gaming-coach/ and commit."; exit 1; }
+          test -z "$(git status --porcelain -- .)" \
+            || { echo "::error::xcodegen produced files that are not committed."; exit 1; }
       - name: CoachCore tests (macOS)
         working-directory: ai-gaming-coach/Packages/CoachKit
         run: swift test
+
+  # Xcode 26 (iOS 26 SDK), for testers whose Mac or iPhone is on 26.
+  ios-build-xcode26:
+    name: iOS build, Xcode 26 (ReplayKit only)
+    runs-on: macos-26
+    defaults:
+      run:
+        working-directory: ai-gaming-coach
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show toolchain
+        run: xcodebuild -version
+      - name: Build for iOS device (unsigned)
+        run: ../.github/scripts/xcodebuild-ios.sh
+      - name: Check extension is embedded
+        run: ../.github/scripts/check-app-bundle.sh
 
   # iOS 27 SDK: compiles the ScreenCaptureKit provider against Apple's
   # real headers. Xcode 27 is a public-preview runner image ("xcode-27").
@@ -76,10 +101,6 @@ jobs:
           sudo xcode-select -s "$xcode"
           xcodebuild -version
           xcodebuild -showsdks | grep -i iphoneos
-      - name: Install XcodeGen
-        run: brew install xcodegen
-      - name: Generate project
-        run: xcodegen generate
       - name: Build for iOS device (unsigned)
         run: ../.github/scripts/xcodebuild-ios.sh
       - name: Check extension and ScreenCaptureKit provider are built
