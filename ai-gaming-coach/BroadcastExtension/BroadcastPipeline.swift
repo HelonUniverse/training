@@ -189,11 +189,25 @@ final class BroadcastPipeline {
 
     // MARK: Helpers
 
+    /// Orientation to apply when displaying the frame (EXIF semantics, as used
+    /// by `CIImage.oriented` and the segment writer's transform).
+    ///
+    /// ReplayKit's attachment describes the rotation in the opposite sense for
+    /// the 90° cases. Verified on an iPhone 15 (iOS 26.3.1) with Fortnite in
+    /// landscape: buffers arrived as 408×886 tagged `.right` (6), and applying
+    /// `.right` rendered keyframes and video upside down. Left and right are
+    /// therefore swapped; `.up` and `.down` are unaffected.
     static func orientation(of sampleBuffer: CMSampleBuffer) -> CGImagePropertyOrientation {
         guard let value = CMGetAttachment(sampleBuffer, key: RPVideoSampleOrientationKey as CFString, attachmentModeOut: nil) as? NSNumber,
               let orientation = CGImagePropertyOrientation(rawValue: value.uint32Value)
         else { return .up }
-        return orientation
+        switch orientation {
+        case .right: return .left
+        case .left: return .right
+        case .rightMirrored: return .leftMirrored
+        case .leftMirrored: return .rightMirrored
+        default: return orientation
+        }
     }
 
     private static func checkFreeStorage(at url: URL) throws {
