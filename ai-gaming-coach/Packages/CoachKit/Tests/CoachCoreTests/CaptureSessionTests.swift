@@ -23,6 +23,7 @@ final class CaptureSessionTests: XCTestCase {
         var settings = CaptureSettings.default
         settings.rollingBufferSeconds = 30
         settings.segmentSeconds = 5
+        settings.keepFullMatchVideo = false
         mutate(&settings)
         let controller = CaptureSessionController(
             store: store, gameID: "fortnite",
@@ -140,6 +141,15 @@ final class CaptureSessionTests: XCTestCase {
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: dir.keyframesURL.path), [])
         XCTAssertEqual(store.events(for: controller.sessionID).last?.type, .captureFinished)
         XCTAssertEqual(try store.manifest(for: controller.sessionID).statistics.videoFramesReceived, 600)
+    }
+
+    func testFullMatchModeKeepsEverySegment() throws {
+        let controller = try makeController { $0.keepFullMatchVideo = true }
+        try simulate(controller, seconds: 60)
+        let manifest = controller.finish()
+        XCTAssertEqual(manifest.bufferedSegments.count, 12)
+        XCTAssertEqual(manifest.statistics.segmentsEvicted, 0)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: controller.directory.segmentsURL.path).count, 12)
     }
 
     func testDropsAreCountedPerReason() throws {

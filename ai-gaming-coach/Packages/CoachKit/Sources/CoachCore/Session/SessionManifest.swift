@@ -9,13 +9,24 @@ public struct CaptureSourceInfo: Codable, Hashable, Sendable {
     public var deviceModel: String?
     public var osVersion: String?
     public var appVersion: String?
+    /// True when stored keyframes and video carry the corrected display
+    /// orientation. nil for ReplayKit sessions recorded before the fix, whose
+    /// gameplay frames are rotated 180° and must be turned back when read.
+    public var displayOrientationCorrected: Bool?
 
-    public init(platform: String, mechanism: String, deviceModel: String? = nil, osVersion: String? = nil, appVersion: String? = nil) {
+    public init(platform: String, mechanism: String, deviceModel: String? = nil, osVersion: String? = nil,
+                appVersion: String? = nil, displayOrientationCorrected: Bool? = true) {
         self.platform = platform
         self.mechanism = mechanism
         self.deviceModel = deviceModel
         self.osVersion = osVersion
         self.appVersion = appVersion
+        self.displayOrientationCorrected = displayOrientationCorrected
+    }
+
+    /// Frames from this session need a 180° turn to be upright.
+    public var needsLegacyRotation: Bool {
+        displayOrientationCorrected != true && CaptureProviderKind(mechanism: mechanism) == .replayKit
     }
 }
 

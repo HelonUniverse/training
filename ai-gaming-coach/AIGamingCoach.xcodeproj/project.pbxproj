@@ -10,9 +10,11 @@
 		13B6CC16B322678A341880A5 /* SharedEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F9BFC3EA09ACFE292DF4878 /* SharedEnvironment.swift */; };
 		23C5A99C5DF6ADA6941DEBFF /* KeyframeEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC1DD5852C267FE453A28675 /* KeyframeEncoder.swift */; };
 		289EB9DE24E4855ED37E2B1A /* SharedEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F9BFC3EA09ACFE292DF4878 /* SharedEnvironment.swift */; };
+		2A386DD9F93D4C5D9445267A /* MatchAnalysisView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1C6AE6F76F04E7420DC6CE6 /* MatchAnalysisView.swift */; };
 		4113DC32CF68757CAE9F6F2F /* CoachModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9295F7A63F7DAF4C222E5B43 /* CoachModel.swift */; };
 		482C3BBEB00CF119B03B72A4 /* DeviceInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 051252CE74AC39B631445A98 /* DeviceInfo.swift */; };
 		51CBC0C4AC8F172BE5AF6852 /* ReplayKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9D0E93D2203F980029282A86 /* ReplayKit.framework */; };
+		5FE1F2475607AA3FE2BE9446 /* OpenAIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = C207936BD9C9C6BF7949585C /* OpenAIClient.swift */; };
 		693D1BFA882D870288A6394A /* ProviderComparisonView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E3743EA96342614B1568588 /* ProviderComparisonView.swift */; };
 		6E33F4476BE77D672027DC3C /* SegmentWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D629BAA00A76F26371AF2BD /* SegmentWriter.swift */; };
 		70636E25E6E7AA926590C964 /* KeyframeEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC1DD5852C267FE453A28675 /* KeyframeEncoder.swift */; };
@@ -24,6 +26,7 @@
 		9F3D1380A8C1B4B0C37850B3 /* DeviceTestReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAC21F5F9CA97B9C2334A3EC /* DeviceTestReportView.swift */; };
 		A6E50BDB81866B5C5C9921FD /* BroadcastExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = DE5BDE23E921906232CF1434 /* BroadcastExtension.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		A74CF6BFB93F2B074A25DD8C /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C463F618E356BEFB970F938 /* SettingsView.swift */; };
+		A8E9A9E2E5ED42AC38F78ABD /* VideoFrameExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB2B969F7B1D641402C0C8BE /* VideoFrameExtractor.swift */; };
 		B167766ABCD85B0FD2BAFE2A /* BroadcastPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53A28A0A52384D2EA5BF06A3 /* BroadcastPicker.swift */; };
 		B1BFA8E3264A59549B080D5E /* FramePipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62997CDB3C8D487565FF3C1E /* FramePipeline.swift */; };
 		BD4B467A75B67170D135A988 /* ReplayKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9D0E93D2203F980029282A86 /* ReplayKit.framework */; };
@@ -86,10 +89,13 @@
 		AC1DD5852C267FE453A28675 /* KeyframeEncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyframeEncoder.swift; sourceTree = "<group>"; };
 		B6F2AB88204D741B173EC91A /* ScreenCaptureKitSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenCaptureKitSession.swift; sourceTree = "<group>"; };
 		BAC21F5F9CA97B9C2334A3EC /* DeviceTestReportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceTestReportView.swift; sourceTree = "<group>"; };
+		C207936BD9C9C6BF7949585C /* OpenAIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAIClient.swift; sourceTree = "<group>"; };
 		C36963BED844910358EB26B6 /* BroadcastPipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BroadcastPipeline.swift; sourceTree = "<group>"; };
+		D1C6AE6F76F04E7420DC6CE6 /* MatchAnalysisView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MatchAnalysisView.swift; sourceTree = "<group>"; };
 		D3907D6A24E52482EFAF767D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		DE5BDE23E921906232CF1434 /* BroadcastExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = BroadcastExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		F1B54FA92FD43DFEC7C666DC /* DebugView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugView.swift; sourceTree = "<group>"; };
+		FB2B969F7B1D641402C0C8BE /* VideoFrameExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoFrameExtractor.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -144,6 +150,7 @@
 		7A256909BA5CC398AD3C96F9 /* App */ = {
 			isa = PBXGroup;
 			children = (
+				8225EB89969AB4BC75B87C69 /* Analysis */,
 				335DE58C1D112CBBB953DE87 /* Capture */,
 				9C2259F2AFC9EA78176833E9 /* Model */,
 				D713CE7E33584B3863818216 /* Views */,
@@ -160,6 +167,15 @@
 				81D60DCC4C8ADB03CAAF5580 /* CoachKit */,
 			);
 			path = Packages;
+			sourceTree = "<group>";
+		};
+		8225EB89969AB4BC75B87C69 /* Analysis */ = {
+			isa = PBXGroup;
+			children = (
+				C207936BD9C9C6BF7949585C /* OpenAIClient.swift */,
+				FB2B969F7B1D641402C0C8BE /* VideoFrameExtractor.swift */,
+			);
+			path = Analysis;
 			sourceTree = "<group>";
 		};
 		9C2259F2AFC9EA78176833E9 /* Model */ = {
@@ -211,6 +227,7 @@
 				F1B54FA92FD43DFEC7C666DC /* DebugView.swift */,
 				BAC21F5F9CA97B9C2334A3EC /* DeviceTestReportView.swift */,
 				43A902C7404148C3E1081BE5 /* HomeView.swift */,
+				D1C6AE6F76F04E7420DC6CE6 /* MatchAnalysisView.swift */,
 				5ED247B76751DA7D2E625CB9 /* MetricFormat.swift */,
 				9E3743EA96342614B1568588 /* ProviderComparisonView.swift */,
 				7E1919D67DF90BC16B0396CE /* SessionSummaryView.swift */,
@@ -330,7 +347,9 @@
 				7BD3EE2392107F6E308D1DD1 /* FramePipeline.swift in Sources */,
 				76A8B67F4D575DD2431A7102 /* HomeView.swift in Sources */,
 				23C5A99C5DF6ADA6941DEBFF /* KeyframeEncoder.swift in Sources */,
+				2A386DD9F93D4C5D9445267A /* MatchAnalysisView.swift in Sources */,
 				F3ECA5C3A102E51D3EDDC099 /* MetricFormat.swift in Sources */,
+				5FE1F2475607AA3FE2BE9446 /* OpenAIClient.swift in Sources */,
 				693D1BFA882D870288A6394A /* ProviderComparisonView.swift in Sources */,
 				E2BC92F9D8CAE425975FB34A /* ScreenCaptureKitCaptureProvider.swift in Sources */,
 				8FF0195D58F27207FC791DD7 /* ScreenCaptureKitSession.swift in Sources */,
@@ -338,6 +357,7 @@
 				FF93CA560118B5D65D4042A0 /* SessionSummaryView.swift in Sources */,
 				A74CF6BFB93F2B074A25DD8C /* SettingsView.swift in Sources */,
 				13B6CC16B322678A341880A5 /* SharedEnvironment.swift in Sources */,
+				A8E9A9E2E5ED42AC38F78ABD /* VideoFrameExtractor.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

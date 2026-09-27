@@ -76,7 +76,7 @@ public final class CaptureSessionController: @unchecked Sendable {
         self.directory = store.directory(for: manifest.id)
         frameGate = FrameGate(targetFPS: settings.analysisFPS)
         keyframes = KeyframeScheduler(interval: settings.keyframeIntervalSeconds)
-        buffer = RollingSegmentBuffer(capacity: settings.rollingBufferSeconds)
+        buffer = RollingSegmentBuffer(capacity: settings.effectiveBufferSeconds)
     }
 
     public var settings: CaptureSettings { manifest.settings }

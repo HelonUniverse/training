@@ -96,6 +96,8 @@ struct SessionSummaryView: View {
                 }
             }
 
+            MatchAnalysisSection(sessionID: manifest.id)
+
             Section {
                 NavigationLink("Device test result") { DeviceTestReportView(sessionID: manifest.id) }
             } footer: {

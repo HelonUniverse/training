@@ -1,6 +1,7 @@
 import CoachCore
 import Foundation
 import Observation
+import UIKit
 
 /// App-side view of the shared container. With ReplayKit the app never
 /// receives frames: it reads what the broadcast extension persisted and
@@ -54,11 +55,31 @@ final class CoachModel {
     @ObservationIgnored private var inAppSession: AnyObject?
     @ObservationIgnored private let providerChoiceKey = "coach.captureProvider"
 
+    // MARK: AI analysis state
+
+    enum AnalysisState: Equatable {
+        case idle
+        case extracting(done: Int, total: Int)
+        case analyzing(done: Int, total: Int)
+        case summarizing
+        case failed(String)
+    }
+
+    static let defaultOpenAIModel = "gpt-5-mini"
+    private(set) var hasOpenAIKey = OpenAIKeyStore.read() != nil
+    var openAIModel: String {
+        didSet { UserDefaults.standard.set(openAIModel, forKey: "coach.openAIModel") }
+    }
+    private(set) var analysisStates: [UUID: AnalysisState] = [:]
+    /// Bumped when an analysis is saved so views reload it.
+    private(set) var analysisRevision = 0
+
     init() {
         // ScreenCaptureKit is the preferred provider to test where it exists;
         // the user's explicit choice is remembered either way.
         providerChoice = UserDefaults.standard.string(forKey: "coach.captureProvider")
             .flatMap(ProviderChoice.init(rawValue:)) ?? .screenCaptureKit
+        openAIModel = UserDefaults.standard.string(forKey: "coach.openAIModel") ?? Self.defaultOpenAIModel
         extensionBundleID = Bundle.main.object(forInfoDictionaryKey: SharedEnvironment.extensionBundleIDInfoKey) as? String
         do {
             let environment = try SharedEnvironment.current()
@@ -227,6 +248,75 @@ final class CoachModel {
         inAppCaptureState = .stopping
         Task { await session.stop() }
         #endif
+    }
+
+    // MARK: AI match analysis
+
+    func saveOpenAIKey(_ key: String) {
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        hasOpenAIKey = OpenAIKeyStore.save(trimmed)
+    }
+
+    func removeOpenAIKey() {
+        OpenAIKeyStore.delete()
+        hasOpenAIKey = false
+    }
+
+    func analysis(for id: UUID) -> MatchAnalysis? {
+        _ = analysisRevision
+        return store?.analysis(for: id)
+    }
+
+    func analysisState(for id: UUID) -> AnalysisState { analysisStates[id] ?? .idle }
+
+    private func frameExtractor(for id: UUID) -> VideoFrameExtractor? {
+        guard let store, let manifest = sessions.first(where: { $0.id == id }) else { return nil }
+        return VideoFrameExtractor(directory: store.directory(for: id), manifest: manifest, keyframes: store.keyframes(for: id))
+    }
+
+    func estimatedAnalysisFrames(for id: UUID) -> Int { frameExtractor(for: id)?.estimatedFrameCount ?? 0 }
+
+    /// Extracts frames on the device, sends them to OpenAI and saves the
+    /// result as the session's analysis.json. Keeps the screen awake while
+    /// it runs, since leaving the app would pause the network requests.
+    func analyze(_ id: UUID) {
+        switch analysisState(for: id) {
+        case .extracting, .analyzing, .summarizing: return
+        default: break
+        }
+        guard let key = OpenAIKeyStore.read() else {
+            analysisStates[id] = .failed(AnalysisError.missingAPIKey.localizedDescription)
+            return
+        }
+        guard let store, let extractor = frameExtractor(for: id),
+              let manifest = sessions.first(where: { $0.id == id }) else { return }
+
+        let model = openAIModel.trimmingCharacters(in: .whitespaces).isEmpty ? Self.defaultOpenAIModel : openAIModel
+        analysisStates[id] = .extracting(done: 0, total: extractor.estimatedFrameCount)
+        UIApplication.shared.isIdleTimerDisabled = true
+
+        Task {
+            defer { UIApplication.shared.isIdleTimerDisabled = false }
+            do {
+                let frames = await extractor.extract { done, total in
+                    Task { @MainActor in self.analysisStates[id] = .extracting(done: done, total: total) }
+                }
+                let analyzer = MatchAnalyzer(client: OpenAIHTTPClient(apiKey: key), model: model, language: "es")
+                let analysis = try await analyzer.analyze(frames: frames, manifest: manifest) { progress in
+                    Task { @MainActor in
+                        self.analysisStates[id] = progress.writingSummary
+                            ? .summarizing
+                            : .analyzing(done: progress.segmentsDone, total: progress.segmentsTotal)
+                    }
+                }
+                try store.save(analysis, for: id)
+                analysisRevision += 1
+                analysisStates[id] = .idle
+            } catch {
+                analysisStates[id] = .failed(error.localizedDescription)
+            }
+        }
     }
 
     // MARK: Device testing

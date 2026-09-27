@@ -20,6 +20,16 @@ public struct CaptureSettings: Codable, Hashable, Sendable {
     public var dontSaveVideo: Bool
     /// Keep keyframes after the session ends.
     public var keepKeyframes: Bool
+    /// Keep the whole match on disk (up to `fullMatchMaxSeconds`) instead of
+    /// only the rolling window, so the match can be analysed afterwards.
+    public var keepFullMatchVideo: Bool
+
+    public static let fullMatchMaxSeconds: Double = 3600
+
+    /// Seconds of video the buffer keeps before evicting.
+    public var effectiveBufferSeconds: Double {
+        keepFullMatchVideo ? Self.fullMatchMaxSeconds : rollingBufferSeconds
+    }
 
     public static let rollingBufferRange: ClosedRange<Double> = 30...300
     public static let analysisFPSRange: ClosedRange<Double> = 1...30
@@ -33,9 +43,10 @@ public struct CaptureSettings: Codable, Hashable, Sendable {
         keyframeMaxDimension: 960,
         keyframeJPEGQuality: 0.7,
         videoMaxDimension: 1280,
-        videoBitrate: 4_000_000,
+        videoBitrate: 2_000_000,
         dontSaveVideo: false,
-        keepKeyframes: true
+        keepKeyframes: true,
+        keepFullMatchVideo: true
     )
 
     public init(
@@ -48,7 +59,8 @@ public struct CaptureSettings: Codable, Hashable, Sendable {
         videoMaxDimension: Int,
         videoBitrate: Int,
         dontSaveVideo: Bool,
-        keepKeyframes: Bool
+        keepKeyframes: Bool,
+        keepFullMatchVideo: Bool = true
     ) {
         self.rollingBufferSeconds = rollingBufferSeconds
         self.segmentSeconds = segmentSeconds
@@ -59,6 +71,7 @@ public struct CaptureSettings: Codable, Hashable, Sendable {
         self.videoMaxDimension = videoMaxDimension
         self.videoBitrate = videoBitrate
         self.dontSaveVideo = dontSaveVideo
+        self.keepFullMatchVideo = keepFullMatchVideo
         self.keepKeyframes = keepKeyframes
     }
 
@@ -103,5 +116,32 @@ public struct CaptureSettingsStore {
 extension Comparable {
     func clamped(to range: ClosedRange<Self>) -> Self {
         min(max(self, range.lowerBound), range.upperBound)
+    }
+}
+
+extension CaptureSettings {
+    private enum CodingKeys: String, CodingKey {
+        case rollingBufferSeconds, segmentSeconds, analysisFPS, keyframeIntervalSeconds, keyframeMaxDimension
+        case keyframeJPEGQuality, videoMaxDimension, videoBitrate, dontSaveVideo, keepKeyframes, keepFullMatchVideo
+    }
+
+    /// Settings saved by earlier builds lack `keepFullMatchVideo`; they
+    /// decode with the new default instead of failing (which would drop
+    /// the user's settings and make old session manifests unreadable).
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            rollingBufferSeconds: try c.decode(Double.self, forKey: .rollingBufferSeconds),
+            segmentSeconds: try c.decode(Double.self, forKey: .segmentSeconds),
+            analysisFPS: try c.decode(Double.self, forKey: .analysisFPS),
+            keyframeIntervalSeconds: try c.decode(Double.self, forKey: .keyframeIntervalSeconds),
+            keyframeMaxDimension: try c.decode(Int.self, forKey: .keyframeMaxDimension),
+            keyframeJPEGQuality: try c.decode(Double.self, forKey: .keyframeJPEGQuality),
+            videoMaxDimension: try c.decode(Int.self, forKey: .videoMaxDimension),
+            videoBitrate: try c.decode(Int.self, forKey: .videoBitrate),
+            dontSaveVideo: try c.decode(Bool.self, forKey: .dontSaveVideo),
+            keepKeyframes: try c.decode(Bool.self, forKey: .keepKeyframes),
+            keepFullMatchVideo: try c.decodeIfPresent(Bool.self, forKey: .keepFullMatchVideo) ?? true
+        )
     }
 }

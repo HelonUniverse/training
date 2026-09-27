@@ -17,6 +17,7 @@ public struct SessionDirectory: Hashable, Sendable {
     public var eventsURL: URL { url.appendingPathComponent("events.jsonl") }
     public var keyframeIndexURL: URL { url.appendingPathComponent("keyframes.jsonl") }
     public var deviceTestNotesURL: URL { url.appendingPathComponent("device-test.json") }
+    public var analysisURL: URL { url.appendingPathComponent("analysis.json") }
     public var keyframesURL: URL { url.appendingPathComponent("keyframes", isDirectory: true) }
     public var segmentsURL: URL { url.appendingPathComponent("segments", isDirectory: true) }
     public var preservedURL: URL { url.appendingPathComponent("preserved", isDirectory: true) }
@@ -149,6 +150,17 @@ public final class SessionStore: @unchecked Sendable {
 
     public func deviceTestReport(for id: UUID, now: Date = Date()) throws -> DeviceTestReport {
         DeviceTestReport(manifest: try manifest(for: id), notes: deviceTestNotes(for: id), now: now)
+    }
+
+    // MARK: Match analysis
+
+    public func analysis(for id: UUID) -> MatchAnalysis? {
+        guard let data = try? Data(contentsOf: directory(for: id).analysisURL) else { return nil }
+        return try? decoder.decode(MatchAnalysis.self, from: data)
+    }
+
+    public func save(_ analysis: MatchAnalysis, for id: UUID) throws {
+        try encoder.encode(analysis).write(to: directory(for: id).analysisURL, options: .atomic)
     }
 
     // MARK: Privacy

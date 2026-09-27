@@ -96,27 +96,13 @@ private struct StatusPanel: View {
                 StatusRow(title: "Screen capture",
                           detail: model.isCaptureLive ? "Connected" : "Not connected",
                           level: model.isCaptureLive ? .ok : .off)
-                StatusRow(title: "AI", detail: aiDetail, level: aiLevel)
+                StatusRow(title: "AI",
+                          detail: model.hasOpenAIKey ? "OpenAI · \(model.openAIModel)" : "Add OpenAI key in Settings",
+                          level: model.hasOpenAIKey ? .ok : .warning)
                 // Game/match detection is vision work: Milestone 2.
                 StatusRow(title: "Match detected", detail: "Not available yet (Milestone 2)", level: .off)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    private var aiDetail: String {
-        switch model.aiStatus {
-        case .connected: return "Connected (\(model.backend.name))"
-        case .mock: return "Mock backend (offline)"
-        case .unavailable(let reason): return reason
-        }
-    }
-
-    private var aiLevel: StatusRow.Level {
-        switch model.aiStatus {
-        case .connected: return .ok
-        case .mock: return .warning
-        case .unavailable: return .error
         }
     }
 }

@@ -4,6 +4,7 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(CoachModel.self) private var model
     @State private var confirmDeleteAll = false
+    @State private var apiKeyDraft = ""
 
     var body: some View {
         @Bindable var model = model
@@ -21,6 +22,33 @@ struct SettingsView: View {
                 Text("Capture")
             } footer: {
                 Text("Changes apply to the next session.")
+            }
+
+            Section {
+                if model.hasOpenAIKey {
+                    LabeledContent("API key", value: "Saved on this iPhone ✓")
+                    Button("Remove API key", role: .destructive) { model.removeOpenAIKey() }
+                } else {
+                    SecureField("Paste your OpenAI API key (sk-…)", text: $apiKeyDraft)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    Button("Save API key") {
+                        model.saveOpenAIKey(apiKeyDraft)
+                        apiKeyDraft = ""
+                    }
+                    .disabled(apiKeyDraft.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+                LabeledContent("Model") {
+                    TextField(CoachModel.defaultOpenAIModel, text: $model.openAIModel)
+                        .multilineTextAlignment(.trailing)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                }
+                Toggle("Keep full match video", isOn: $model.settings.keepFullMatchVideo)
+            } header: {
+                Text("AI analysis (OpenAI)")
+            } footer: {
+                Text("The key is stored in this iPhone's Keychain only. Analysis sends about one frame per second of the match to OpenAI, only when you tap Analyze; usage is billed to your OpenAI account. \"Keep full match video\" saves the whole match (up to 60 min, ~150 MB per 10 min) so every minute can be analysed; turn it off to keep only the last \(Int(model.settings.rollingBufferSeconds)) s.")
             }
 
             Section {
