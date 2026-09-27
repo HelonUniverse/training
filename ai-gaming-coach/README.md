@@ -15,16 +15,18 @@ CAPTURE (ReplayKit extension)  →  STREAM PROCESSING (BroadcastPipeline)
 
 `CoachCore` (Swift Package) solo depende de Foundation. Contiene el controlador de sesión, el buffer circular, la timeline, las estadísticas y el almacenamiento, y se puede reutilizar con otras fuentes de captura (Android, PC, consolas).
 
-## Compilar
+## Instalar en un iPhone
+
+Sigue [`INSTALL_ON_IPHONE.md`](INSTALL_ON_IPHONE.md). Solo necesitas Xcode: el proyecto `AIGamingCoach.xcodeproj` ya está generado y versionado.
+
+## Desarrollo
 
 ```bash
 # Núcleo (macOS o Linux)
 cd Packages/CoachKit && swift test
 
-# App + extensión (macOS con Xcode)
-brew install xcodegen
-xcodegen generate
-open AIGamingCoach.xcodeproj   # poner DEVELOPMENT_TEAM en project.yml
+# Tras editar project.yml, regenera y versiona el proyecto:
+brew install xcodegen && xcodegen generate
 ```
 
-El proyecto de Xcode, los Info.plist y los entitlements se generan desde `project.yml`, así que no están versionados. CI (`.github/workflows/ai-gaming-coach.yml`) ejecuta los tests del núcleo en Linux y compila la app y la extensión en macOS sin firmar.
+CI (`.github/workflows/ai-gaming-coach.yml`) ejecuta los tests del núcleo y compila el proyecto versionado, sin firma, con Xcode 16, 26 y 27. Falla si el proyecto deja de coincidir con `project.yml` o si aparece algún warning.
