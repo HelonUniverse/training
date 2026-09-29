@@ -1,6 +1,16 @@
 # PassPro™ Video Studio: MVP v0.1 implementation plan
 
-Status: **PROPOSAL — waiting for approval. No production code or database changes have been made.**
+Status: **Approved in principle (2026-09-29) with changes; backend core built mock-first.**
+
+> **Decisions recorded 2026-09-29** (these supersede the matching parts below):
+> - The frontend was not found (see `INTEGRATION-BOUNDARY.md`). UI work is stopped and no second app was created.
+> - The minimal schema has 9 tables + `vs_settings` (see `SCHEMA.md`). It is **not applied** to the live DB.
+> - Render worker: **Railway**. It never holds MiniMax, Anthropic or ElevenLabs keys.
+> - Voices: MiniMax **native** Spanish dialogue first. VoiceProvider is an interface; ElevenLabs is the fallback only.
+> - Master images (Doña Póliza, El Sobrino, Kevin) will be uploaded later through the asset system. Nothing is recreated.
+> - Limits: $3/clip, $30/episode, $40/day, $5 retry per episode (configurable). `VIDEO_PROVIDER_MODE=mock` is the default.
+> - Locked: 85 scored, 10 pretest, 120 minutes. **70% stays UNVERIFIED.**
+> - No MiniMax call and no paid request until pricing, resolution, model id and parameters are independently confirmed.
 Date: 2026-09-29
 Companion doc: [`video-provider-minimax.md`](./video-provider-minimax.md)
 

@@ -1,0 +1,20 @@
+# FIXTURE — synthetic test script. NOT the canonical Video 0 script.
+
+ESCENA 1 — EXTERIOR, CASA DE DOÑA PÓLIZA
+[Doña Póliza sale al portal con una bandeja de pastelillos y la pone en la mesa.]
+DOÑA PÓLIZA: ¿Tú también vienes por el examen? Siéntate, que esto se explica mejor con un pastelillo.
+LA VOZ DEL EXAMEN: Pregunta número uno...
+DOÑA PÓLIZA: ¡Shhh! Todavía no. Primero el café.
+
+ESCENA 2 — EXTERIOR, PORTAL
+[CÁMARA: primer plano de la bandeja]
+DOÑA PÓLIZA: Mira esta bandeja. El examen tiene 85 preguntas que cuentan para la nota.
+DOÑA PÓLIZA: Y además trae diez preguntas de prueba que no cuentan. Pero tú no sabes cuáles son, así que todas se contestan con cariño.
+DOÑA PÓLIZA: Y tienes dos horas. Eso es tiempo para un café y medio... digo, para pensar.
+---
+DOÑA PÓLIZA: Esto es un "beneficiary"... ¡Ay, perdón! Un beneficiario. En esta casa se habla español.
+
+ESCENA 3 — EXTERIOR, CASA DE DOÑA PÓLIZA
+[El Sobrino entra corriendo, agarra un pastelillo y se detiene.]
+EL SOBRINO: Titi, si todo se explica con pastelillos, ¿por qué el examen no trae pastelillos?
+[El Sobrino se va corriendo.]

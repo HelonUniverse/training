@@ -1,0 +1,20 @@
+{
+  "name": "passpro-video-studio",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "PassPro Video Studio: reusable video-production core + PassPro education layer + FFmpeg render worker.",
+  "engines": { "node": ">=22.18" },
+  "scripts": {
+    "test": "node --test --test-reporter=spec test/*.test.ts",
+    "test:db": "bash supabase/tests/run-db-tests.sh",
+    "typecheck": "tsc --noEmit",
+    "demo": "node demo/run-demo.ts",
+    "seed:sql": "node scripts/build-seed-sql.ts",
+    "worker": "node src/worker/main.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.9.0"
+  }
+}
