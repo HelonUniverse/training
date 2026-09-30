@@ -1243,6 +1243,9 @@
       "noDuration": "Length not recorded",
       "byChild": "Recorded by {name}",
       "nothingChanged": "None of this changed what Nestra says about your child."
-    }
+    },
+    "chooseSomethingDifferentChild": "Try a different one for this",
+    "chooseSomethingDifferentChildOptions": "Something else that already works for this",
+    "notAConfirmedOption": "That one isn't ready for this yet. Ask a grown-up if you think it should be."
   }
 }

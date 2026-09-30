@@ -786,7 +786,8 @@ rollback;
 
 begin;
 do $$
-declare v_act uuid; j jsonb; v_sess uuid; v_doc uuid; v_art uuid; v_prop uuid; v_kinds text;
+declare v_act uuid; j jsonb; v_sess uuid; v_doc uuid; v_art uuid; v_prop uuid;
+        v_kinds text; v_hist_kinds text;
 begin
   v_act := t.p9_ready('11111111-1111-4111-8111-000000000001');
   v_doc := t.p9_document('44444444-4444-4444-8444-00000000000d',
@@ -823,6 +824,18 @@ begin
   perform t.assert_eq(v_kinds,
     'selected,resource_opened,session_started,session_paused,session_resumed,artifact_added,session_ended,completed,evidence_offered,evidence_accepted',
     '52a. the whole morning reads back in order, with nothing overwritten');
+
+  -- 52a PROVES THE RAW TABLE ORDERS CORRECTLY. This proves activity_history()
+  -- ITSELF reads it that way - not a second function that happens to be
+  -- correct while the one the app actually calls has silently reverted to the
+  -- pre-fix ordering. That exact regression happened once already: a later
+  -- migration file re-defined activity_history without `seq`, clobbering the
+  -- fix, and nothing failed until this assertion was added to check the
+  -- function's own output rather than only the table underneath it.
+  select string_agg(elem->>'kind', ',' order by ord) into v_hist_kinds
+    from jsonb_array_elements(j->'events') with ordinality as t(elem, ord);
+  perform t.assert_eq(v_hist_kinds, v_kinds,
+    '52a2. and activity_history() itself returns that same order - not a stale, unordered copy');
 
   perform t.assert_eq((j->>'evidence_created_by_doing_any_of_this')::boolean, false,
     '52b. and the history says plainly that none of the doing created evidence');
@@ -1215,6 +1228,144 @@ begin
   exception when others then
     perform t.assert(sqlerrm like '%laa_points_at_something_ck%',
       'N6. an artifact has to point at a document or a portfolio item');
+  end;
+end $$;
+rollback;
+
+-- =============================================================================
+-- 55-60. A child may choose something different - restricted to what is
+-- already confirmed for the skill she is already working on
+-- =============================================================================
+-- Resolved at the gate: yes, but not the whole catalogue. Only a resource
+-- already an eligible, confirmed candidate for the SAME skill this activity is
+-- already for - the exact list app.learning_activity_candidates draws from.
+
+begin;
+do $$
+declare v_act uuid; j jsonb; v_new uuid; v_sk uuid;
+begin
+  v_act := t.p9_ready('11111111-1111-4111-8111-000000000001');
+  select skill_id into v_sk from public.learning_activities where id = v_act;
+
+  -- Make sure there is a genuine ALTERNATIVE confirmed for the same skill, not
+  -- just the one Phase 1 already picked.
+  perform t.logout();
+  update public.resource_skills rs
+     set confirmed = true, confirmed_by = '11111111-1111-4111-8111-000000000001',
+         confirmed_at = now()
+   where rs.skill_id = v_sk and rs.resource_id <> (select resource_id from public.learning_activities where id = v_act);
+
+  -- THE CHILD does the choosing herself.
+  perform t.login('11111111-1111-4111-8111-000000000009');
+  j := public.child_choose_alternative_activity(v_act,
+        'dddddddd-0000-4000-8000-000000000005', 'P9 me gusta más el video');
+  perform t.logout();
+
+  perform t.assert_eq((j->>'chosen')::boolean, true,
+    '55a. a child may choose among the confirmed alternatives for her own skill');
+  v_new := (j->>'activity_id')::uuid;
+  perform t.assert_eq((select skill_id from public.learning_activities where id = v_new), v_sk,
+    '55b. and the target skill did not move');
+  perform t.assert_eq((select status::text from public.learning_activities where id = v_act),
+    'replaced', '55c. the original activity is set aside, not deleted');
+  perform t.assert_eq((select selected_by from public.learning_activities where id = v_new),
+    '11111111-1111-4111-8111-000000000009'::uuid,
+    '56a. and the row names HER as the one who chose it - not the system, not a parent');
+  perform t.assert_eq((select origin::text from public.learning_activities where id = v_new),
+    'human_selected', '56b. recorded honestly as a human selection');
+  perform t.assert_eq((j->>'evidence_created')::boolean, false,
+    '57a. choosing something different creates no evidence');
+  perform t.assert_eq((j->>'skill_state_changed')::boolean, false,
+    '57b. and moves no state');
+end $$;
+rollback;
+
+begin;
+do $$
+declare v_act uuid; j jsonb; v_other_sk uuid; v_other_resource uuid;
+begin
+  v_act := t.p9_ready('11111111-1111-4111-8111-000000000001');
+
+  -- A resource confirmed for a DIFFERENT skill entirely.
+  select id into v_other_sk from public.skills where code = 'NST.FR.2';
+  perform t.logout();
+  update public.resource_skills rs
+     set confirmed = true, confirmed_by = '11111111-1111-4111-8111-000000000001',
+         confirmed_at = now()
+   where rs.skill_id = v_other_sk;
+  select resource_id into v_other_resource from public.resource_skills
+   where skill_id = v_other_sk and confirmed limit 1;
+
+  perform t.login('11111111-1111-4111-8111-000000000009');
+  j := public.child_choose_alternative_activity(v_act, v_other_resource);
+  perform t.logout();
+
+  perform t.assert_eq((j->>'chosen')::boolean, false,
+    '58a. a resource confirmed for a DIFFERENT skill is refused');
+  perform t.assert_eq(j->>'reason', 'not_one_of_the_confirmed_options_for_this_skill',
+    '58b. with a reason a screen can render');
+  perform t.assert_eq((select status::text from public.learning_activities where id = v_act),
+    'selected', '58c. and nothing about her original activity changed');
+end $$;
+rollback;
+
+begin;
+do $$
+declare v_act uuid; j jsonb;
+begin
+  v_act := t.p9_ready('11111111-1111-4111-8111-000000000001');
+  perform t.login('11111111-1111-4111-8111-000000000009');
+  begin
+    perform public.child_choose_alternative_activity(v_act, null, 'P9 quiero inventar la mía');
+    perform t.assert(false, '59a. a null resource invented a custom activity through the back door');
+  exception when others then
+    perform t.assert(true,
+      '59a. choosing something different still needs a resource - inventing one stays create_custom_activity, a parent''s action');
+  end;
+  perform t.logout();
+end $$;
+rollback;
+
+begin;
+do $$
+declare v_act uuid; j jsonb; v_n int;
+begin
+  -- Diego's family has nothing to do with Lucas.
+  v_act := t.p9_ready('11111111-1111-4111-8111-000000000001');
+  perform t.login('11111111-1111-4111-8111-000000000003');
+  begin
+    perform public.child_choose_alternative_activity(v_act, 'dddddddd-0000-4000-8000-000000000005');
+    perform t.assert(false, '60a. another family reached into this child''s activity');
+  exception when others then
+    perform t.assert(true, '60a. and another family cannot use this at all');
+  end;
+  perform t.logout();
+end $$;
+rollback;
+
+-- =============================================================================
+-- G13. The restriction itself is proved alive by breaking it
+-- =============================================================================
+
+begin;
+do $$
+begin
+  perform t.logout();
+  execute $x$
+    create or replace function public.child_choose_alternative_activity(
+      p_activity uuid, p_resource uuid, p_note text default null)
+    returns jsonb language plpgsql security invoker set search_path = '' as $body$
+    begin
+      -- No restriction at all: any confirmed resource for any skill.
+      return jsonb_build_object('chosen', true);
+    end $body$;
+  $x$;
+  begin
+    perform app.assert_schema_invariants();
+    perform t.assert(false, 'G13. the invariants accepted a child-choice function with no restriction');
+  exception when others then
+    perform t.assert(sqlerrm like '%confirmed candidates%',
+      'G13. removing the confirmed-candidates restriction is refused');
   end;
 end $$;
 rollback;

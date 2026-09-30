@@ -1243,6 +1243,9 @@
       "noDuration": "Duración sin registrar",
       "byChild": "Registrado por {name}",
       "nothingChanged": "Nada de esto cambió lo que Nestra dice sobre tu hija."
-    }
+    },
+    "chooseSomethingDifferentChild": "Probar otro para esto",
+    "chooseSomethingDifferentChildOptions": "Otra cosa que ya funciona para esto",
+    "notAConfirmedOption": "Ese todavía no está listo para esto. Pregúntale a una persona adulta si crees que debería estarlo."
   }
 }

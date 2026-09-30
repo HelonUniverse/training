@@ -555,52 +555,12 @@ end $fn$;
 -- =============================================================================
 -- The whole story of one activity
 -- =============================================================================
-
-create or replace function public.activity_history(p_activity uuid)
-returns jsonb language plpgsql stable security invoker set search_path = '' as $fn$
-declare v public.learning_activities;
-begin
-  select * into v from public.learning_activities a where a.id = p_activity;
-  if not found or not app.can_student_action(v.student_id, 'learning_activity', 'read') then
-    raise exception 'not permitted' using errcode = 'insufficient_privilege';
-  end if;
-
-  return jsonb_build_object(
-    'activity', public.explain_activity(p_activity),
-    'sessions', (select coalesce(jsonb_agg(jsonb_build_object(
-        'session_id', s.id, 'started_at', s.started_at, 'ended_at', s.ended_at,
-        'status', s.status, 'outcome', s.outcome,
-        'duration_minutes', s.duration_minutes,
-        'duration_was_measured', s.duration_minutes is not null,
-        'initiated_by', s.initiated_by, 'ended_by', s.ended_by,
-        'child_note', s.child_note, 'educator_note', s.educator_note)
-        order by s.started_at), '[]'::jsonb)
-      from public.learning_activity_sessions s where s.activity_id = p_activity),
-    'artifacts', (select coalesce(jsonb_agg(jsonb_build_object(
-        'artifact_id', ar.id, 'document_id', ar.document_id,
-        'portfolio_item_id', ar.portfolio_item_id, 'session_id', ar.session_id,
-        'note', ar.note, 'added_by', ar.added_by, 'at', ar.created_at)
-        order by ar.created_at), '[]'::jsonb)
-      from public.learning_activity_artifacts ar where ar.activity_id = p_activity),
-    'evidence_proposals', (select coalesce(jsonb_agg(jsonb_build_object(
-        'proposal_id', pr.id, 'skill_id', pr.skill_id, 'status', pr.status,
-        'offered_at', pr.offered_at, 'decided_by', pr.decided_by,
-        'decided_at', pr.decided_at,
-        'learning_evidence_id', pr.learning_evidence_id)
-        order by pr.offered_at), '[]'::jsonb)
-      from public.learning_evidence_proposals pr where pr.activity_id = p_activity),
-    'events', (select coalesce(jsonb_agg(jsonb_build_object(
-        'kind', e.kind, 'note', e.note, 'actor', e.actor, 'at', e.created_at)
-        order by e.created_at, e.id), '[]'::jsonb)
-      from public.learning_activity_events e where e.activity_id = p_activity),
-    'evidence_created_by_doing_any_of_this', false,
-    'skill_state_changed_by_doing_any_of_this', false);
-end $fn$;
-
-comment on function public.activity_history(uuid) is
-  'The whole story of one activity: what was chosen and why, every occasion it '
-  'was worked on, what was attached, what was offered and what a person '
-  'answered. Reconstructable without rewriting any of it.';
+-- public.activity_history is not defined here. It is defined in 0110a,
+-- ordered ahead of this file specifically so that the seq-based ordering fix
+-- ("An event log that can actually be read back in order") is the version
+-- that ends up live - a create or replace written HERE, after that one, would
+-- silently overwrite a real fix with the defect it was written to correct.
+-- Only the grant belongs to this file; the function belongs to 0110a.
 
 revoke all on function app.today_decide(uuid, app.today_decision_kind, text, date) from public, anon;
 revoke all on function public.today(uuid, date) from public, anon;
