@@ -896,8 +896,15 @@ select t.assert_eq(
   (select count(*)::int from information_schema.columns c
     where c.table_schema = 'public'
       and c.table_name in ('today_decisions','learning_activity_sessions',
-                           'learning_activity_artifacts','learning_evidence_proposals')
-      and c.column_name ~ '(due|overdue|late|failed|missed)'),
+                           'learning_activity_artifacts','learning_evidence_proposals',
+                           'learning_activity_change_requests')
+      -- `late(?!r)` rather than bare `late`, because learning_activity_sessions
+      -- legitimately has `revisit_later` - a wish about NEXT time, nothing to
+      -- do with a deadline - and a bare substring match flagged it. Same fix
+      -- as the one `\mability\M` already needed for `availability` elsewhere
+      -- in this suite: a real word inside another word is not an instance of
+      -- the concept being banned.
+      and c.column_name ~ '(due|overdue|late(?!r)|failed|missed)'),
   0, '54c. and nothing in it can be late');
 
 -- =============================================================================
@@ -1233,120 +1240,581 @@ end $$;
 rollback;
 
 -- =============================================================================
--- 55-60. A child may choose something different - restricted to what is
--- already confirmed for the skill she is already working on
+-- 55-69. STEP 8 PHASE 2 CORRECTION - a request is not a replacement
 -- =============================================================================
--- Resolved at the gate: yes, but not the whole catalogue. Only a resource
--- already an eligible, confirmed candidate for the SAME skill this activity is
--- already for - the exact list app.learning_activity_candidates draws from.
+-- Resolved at the gate, then corrected: a child may ASK for something
+-- different, restricted to what is already confirmed for the skill she is
+-- already working on - but asking is all she can do herself.
+-- CHILD REQUESTS -> ADULT REVIEWS -> ADULT APPROVES OR DECLINES -> ONLY
+-- APPROVAL REPLACES. child_choose_alternative_activity, which let her replace
+-- directly, is gone; these tests are against request_different_activity,
+-- withdraw_activity_change_request, approve_activity_change_request and
+-- decline_activity_change_request instead.
 
 begin;
 do $$
-declare v_act uuid; j jsonb; v_new uuid; v_sk uuid;
+declare v_act uuid; j jsonb; v_sk uuid; v_req uuid;
 begin
   v_act := t.p9_ready('11111111-1111-4111-8111-000000000001');
   select skill_id into v_sk from public.learning_activities where id = v_act;
 
-  -- Make sure there is a genuine ALTERNATIVE confirmed for the same skill, not
-  -- just the one Phase 1 already picked.
+  -- A genuine ALTERNATIVE confirmed for the same skill, not just the one
+  -- Phase 1 already picked.
   perform t.logout();
   update public.resource_skills rs
      set confirmed = true, confirmed_by = '11111111-1111-4111-8111-000000000001',
          confirmed_at = now()
    where rs.skill_id = v_sk and rs.resource_id <> (select resource_id from public.learning_activities where id = v_act);
 
-  -- THE CHILD does the choosing herself.
+  -- 1. THE CHILD can ask.
   perform t.login('11111111-1111-4111-8111-000000000009');
-  j := public.child_choose_alternative_activity(v_act,
+  j := public.request_different_activity(v_act,
         'dddddddd-0000-4000-8000-000000000005', 'P9 me gusta más el video');
   perform t.logout();
 
-  perform t.assert_eq((j->>'chosen')::boolean, true,
-    '55a. a child may choose among the confirmed alternatives for her own skill');
-  v_new := (j->>'activity_id')::uuid;
-  perform t.assert_eq((select skill_id from public.learning_activities where id = v_new), v_sk,
-    '55b. and the target skill did not move');
+  perform t.assert_eq((j->>'requested')::boolean, true,
+    '55a. a child may ask for a confirmed alternative for her own skill');
+  v_req := (j->>'request_id')::uuid;
+  perform t.assert_eq((select status::text from public.learning_activity_change_requests where id = v_req),
+    'pending', '55b. and the request sits pending, waiting on an adult');
+
+  -- 2 & 3. THE REQUEST CHANGES NOTHING about the activity or its resource.
+  perform t.assert_eq((j->>'activity_unchanged')::boolean, true,
+    '56a. the payload itself says the activity is unchanged');
+  perform t.assert_eq((j->>'resource_unchanged')::boolean, true,
+    '56b. and the resource is unchanged');
   perform t.assert_eq((select status::text from public.learning_activities where id = v_act),
-    'replaced', '55c. the original activity is set aside, not deleted');
-  perform t.assert_eq((select selected_by from public.learning_activities where id = v_new),
-    '11111111-1111-4111-8111-000000000009'::uuid,
-    '56a. and the row names HER as the one who chose it - not the system, not a parent');
-  perform t.assert_eq((select origin::text from public.learning_activities where id = v_new),
-    'human_selected', '56b. recorded honestly as a human selection');
+    'selected', '56c. the original activity really is still exactly as it was');
+  perform t.assert_eq(
+    (select resource_id from public.learning_activities where id = v_act) is distinct from
+    (select requested_resource_id from public.learning_activity_change_requests where id = v_req),
+    true, '56d. the activity''s resource is still the original one, not the one she asked for');
+
+  -- 4. THE CANDIDATE SELECTOR DOES NOT RERUN. Asking did not create, remove or
+  -- touch any other activity on this student's path.
+  perform t.assert_eq(
+    (select count(*)::int from public.learning_activities
+      where student_id = '44444444-4444-4444-8444-00000000000d' and status <> 'proposed'),
+    1, '57a. asking created no new activity row and disturbed no other one');
+  perform t.assert_eq((j->>'selector_rerun')::boolean, false,
+    '57b. and the payload says so directly');
+
   perform t.assert_eq((j->>'evidence_created')::boolean, false,
-    '57a. choosing something different creates no evidence');
+    '67a. a request creates no evidence');
   perform t.assert_eq((j->>'skill_state_changed')::boolean, false,
-    '57b. and moves no state');
+    '68a. and moves no skill state');
 end $$;
 rollback;
 
+-- 5. DUPLICATE PENDING REQUEST PREVENTED - repeated reload does not create two.
 begin;
 do $$
-declare v_act uuid; j jsonb; v_other_sk uuid; v_other_resource uuid;
+declare v_act uuid; j1 jsonb; j2 jsonb; v_sk uuid; v_n int;
 begin
   v_act := t.p9_ready('11111111-1111-4111-8111-000000000001');
+  select skill_id into v_sk from public.learning_activities where id = v_act;
+  perform t.logout();
+  update public.resource_skills rs set confirmed = true,
+         confirmed_by = '11111111-1111-4111-8111-000000000001', confirmed_at = now()
+   where rs.skill_id = v_sk and rs.resource_id <> (select resource_id from public.learning_activities where id = v_act);
 
-  -- A resource confirmed for a DIFFERENT skill entirely.
+  perform t.login('11111111-1111-4111-8111-000000000009');
+  j1 := public.request_different_activity(v_act, 'dddddddd-0000-4000-8000-000000000005');
+  j2 := public.request_different_activity(v_act, 'dddddddd-0000-4000-8000-000000000005');
+  perform t.logout();
+
+  perform t.assert_eq((j2->>'requested')::boolean, false,
+    '58a. asking twice does not create a second pending request');
+  perform t.assert_eq(j2->>'reason', 'already_waiting', '58b. with a reason a screen can render');
+  perform t.assert_eq(j2->>'request_id', j1->>'request_id',
+    '58c. and it hands back the very request already waiting');
+  select count(*)::int into v_n from public.learning_activity_change_requests
+   where activity_id = v_act and status = 'pending';
+  perform t.assert_eq(v_n, 1, '58d. exactly one pending request exists at the database level too');
+end $$;
+rollback;
+
+-- 6. A CHILD CAN WITHDRAW her own pending request.
+begin;
+do $$
+declare v_act uuid; v_req uuid; j jsonb;
+begin
+  v_act := t.p9_ready('11111111-1111-4111-8111-000000000001');
+  perform t.logout();
+  update public.resource_skills rs set confirmed = true,
+         confirmed_by = '11111111-1111-4111-8111-000000000001', confirmed_at = now()
+   where rs.skill_id = (select skill_id from public.learning_activities where id = v_act)
+     and rs.resource_id <> (select resource_id from public.learning_activities where id = v_act);
+
+  perform t.login('11111111-1111-4111-8111-000000000009');
+  v_req := (public.request_different_activity(v_act, 'dddddddd-0000-4000-8000-000000000005')->>'request_id')::uuid;
+  j := public.withdraw_activity_change_request(v_req);
+  perform t.logout();
+
+  perform t.assert_eq((j->>'withdrawn')::boolean, true, '59a. a child may withdraw her own pending request');
+  perform t.assert_eq((select status::text from public.learning_activity_change_requests where id = v_req),
+    'withdrawn', '59b. and the row says so');
+end $$;
+rollback;
+
+-- 7. A CHILD CANNOT APPROVE her own request.
+begin;
+do $$
+declare v_act uuid; v_req uuid;
+begin
+  v_act := t.p9_ready('11111111-1111-4111-8111-000000000001');
+  perform t.logout();
+  update public.resource_skills rs set confirmed = true,
+         confirmed_by = '11111111-1111-4111-8111-000000000001', confirmed_at = now()
+   where rs.skill_id = (select skill_id from public.learning_activities where id = v_act)
+     and rs.resource_id <> (select resource_id from public.learning_activities where id = v_act);
+
+  perform t.login('11111111-1111-4111-8111-000000000009');
+  v_req := (public.request_different_activity(v_act, 'dddddddd-0000-4000-8000-000000000005')->>'request_id')::uuid;
+  begin
+    perform public.approve_activity_change_request(v_req);
+    perform t.assert(false, '60a. a child approved her own request');
+  exception when others then
+    perform t.assert(true, '60a. and may not - deciding it is not hers to make');
+  end;
+  begin
+    perform public.decline_activity_change_request(v_req);
+    perform t.assert(false, '60b. a child declined on behalf of an adult');
+  exception when others then
+    perform t.assert(true, '60b. nor may she decline on an adult''s behalf');
+  end;
+  perform t.logout();
+end $$;
+rollback;
+
+-- 8. A VIEW-ONLY GUARDIAN cannot approve either.
+begin;
+do $$
+declare v_act uuid; v_req uuid;
+begin
+  v_act := t.p9_ready('11111111-1111-4111-8111-000000000001');
+  perform t.logout();
+  update public.resource_skills rs set confirmed = true,
+         confirmed_by = '11111111-1111-4111-8111-000000000001', confirmed_at = now()
+   where rs.skill_id = (select skill_id from public.learning_activities where id = v_act)
+     and rs.resource_id <> (select resource_id from public.learning_activities where id = v_act);
+  perform t.login('11111111-1111-4111-8111-000000000009');
+  v_req := (public.request_different_activity(v_act, 'dddddddd-0000-4000-8000-000000000005')->>'request_id')::uuid;
+  perform t.logout();
+
+  perform t.login('11111111-1111-4111-8111-000000000002');
+  begin
+    perform public.approve_activity_change_request(v_req);
+    perform t.assert(false, '61a. a view-only guardian approved a change request');
+  exception when others then
+    perform t.assert(true, '61a. and may not - she has read, not approve');
+  end;
+  perform t.logout();
+end $$;
+rollback;
+
+-- 9. AN UNRELATED FAMILY sees zero and cannot act.
+begin;
+do $$
+declare v_act uuid; v_req uuid; v_n int;
+begin
+  v_act := t.p9_ready('11111111-1111-4111-8111-000000000001');
+  perform t.logout();
+  update public.resource_skills rs set confirmed = true,
+         confirmed_by = '11111111-1111-4111-8111-000000000001', confirmed_at = now()
+   where rs.skill_id = (select skill_id from public.learning_activities where id = v_act)
+     and rs.resource_id <> (select resource_id from public.learning_activities where id = v_act);
+  perform t.login('11111111-1111-4111-8111-000000000009');
+  v_req := (public.request_different_activity(v_act, 'dddddddd-0000-4000-8000-000000000005')->>'request_id')::uuid;
+  perform t.logout();
+
+  perform t.login('11111111-1111-4111-8111-000000000003');
+  select count(*)::int into v_n from public.learning_activity_change_requests
+   where student_id = '44444444-4444-4444-8444-00000000000d';
+  perform t.assert_eq(v_n, 0, '62a. another family''s guardian sees zero requests');
+  begin
+    perform public.approve_activity_change_request(v_req);
+    perform t.assert(false, '62b. another family approved a request that is not theirs');
+  exception when others then
+    perform t.assert(true, '62b. and cannot act on it at all');
+  end;
+  perform t.logout();
+end $$;
+rollback;
+
+-- 10, 12, 13, 14, 16 (no. 11 is the school authorization check just below):
+-- A PARENT can approve, approval uses replace_activity_resource's own
+-- lineage, and everything the design already guaranteed still holds.
+begin;
+do $$
+declare v_act uuid; v_req uuid; j jsonb; v_new uuid; v_sk uuid;
+begin
+  v_act := t.p9_ready('11111111-1111-4111-8111-000000000001');
+  select skill_id into v_sk from public.learning_activities where id = v_act;
+  perform t.logout();
+  update public.resource_skills rs set confirmed = true,
+         confirmed_by = '11111111-1111-4111-8111-000000000001', confirmed_at = now()
+   where rs.skill_id = v_sk and rs.resource_id <> (select resource_id from public.learning_activities where id = v_act);
+
+  perform t.login('11111111-1111-4111-8111-000000000009');
+  v_req := (public.request_different_activity(v_act, 'dddddddd-0000-4000-8000-000000000005',
+             'P9 me gusta más el video')->>'request_id')::uuid;
+  perform t.logout();
+
+  -- 10. A PARENT (guardian_full) can approve.
+  perform t.login('11111111-1111-4111-8111-000000000001');
+  j := public.approve_activity_change_request(v_req, 'P9 sí, adelante');
+  perform t.logout();
+
+  perform t.assert_eq((j->>'approved')::boolean, true, '63a. a parent may approve');
+  v_new := (j->>'activity_id')::uuid;
+
+  -- 13. USES THE EXISTING EXPLICIT-REPLACEMENT LINEAGE - the exact same shape
+  -- replace_activity_resource has always produced for a parent acting
+  -- directly.
+  perform t.assert_eq((select status::text from public.learning_activity_change_requests where id = v_req),
+    'approved', '64a. the request itself now says approved');
+  perform t.assert_eq((select resulting_activity_id from public.learning_activity_change_requests where id = v_req),
+    v_new, '64b. and names the activity it caused');
+  perform t.assert_eq((select status::text from public.learning_activities where id = v_act),
+    'replaced', '65a. the original is set aside, not deleted');
+  perform t.assert_eq((select replaces_activity_id from public.learning_activities where id = v_new),
+    v_act, '65b. the new one names what it replaced');
+  perform t.assert_eq((select replaced_by_activity_id from public.learning_activities where id = v_act),
+    v_new, '65c. and the old one names its replacement, both directions intact');
+  perform t.assert_eq((select skill_id from public.learning_activities where id = v_new),
+    v_sk, '65d. the target skill never moved');
+  perform t.assert_eq((j->>'evidence_created')::boolean, false, '67b. approval creates no evidence');
+  perform t.assert_eq((j->>'skill_state_changed')::boolean, false, '68b. and moves no skill state');
+end $$;
+rollback;
+
+-- 11. AN ASSIGNED EDUCATOR cannot approve - the existing capability model
+-- never gave staff_assigned_write `approve` on learning_activity, and this
+-- correction changes nothing about that.
+begin;
+do $$
+declare v_act uuid; v_req uuid;
+begin
+  v_act := t.p9_ready('11111111-1111-4111-8111-000000000001');
+  perform t.logout();
+  update public.resource_skills rs set confirmed = true,
+         confirmed_by = '11111111-1111-4111-8111-000000000001', confirmed_at = now()
+   where rs.skill_id = (select skill_id from public.learning_activities where id = v_act)
+     and rs.resource_id <> (select resource_id from public.learning_activities where id = v_act);
+  perform t.login('11111111-1111-4111-8111-000000000009');
+  v_req := (public.request_different_activity(v_act, 'dddddddd-0000-4000-8000-000000000005')->>'request_id')::uuid;
+  perform t.logout();
+
+  perform t.login('11111111-1111-4111-8111-000000000005');
+  begin
+    perform public.approve_activity_change_request(v_req);
+    perform t.assert(false, '66a. an assigned educator approved a change request');
+  exception when others then
+    perform t.assert(true,
+      '66a. and may not - the existing capability model never gave staff `approve` on learning_activity');
+  end;
+  perform t.logout();
+end $$;
+rollback;
+
+-- 14, 15. DECLINE changes no learning profile and creates no negative record.
+begin;
+do $$
+declare v_act uuid; v_req uuid; j jsonb; v_sk uuid; v_state text;
+begin
+  v_act := t.p9_ready('11111111-1111-4111-8111-000000000001');
+  select skill_id into v_sk from public.learning_activities where id = v_act;
+  perform t.login('11111111-1111-4111-8111-000000000001');
+  perform public.set_skill_state_override('44444444-4444-4444-8444-00000000000d', v_sk,
+                                          'secure', 'P9 she has this');
+  update public.resource_skills rs set confirmed = true,
+         confirmed_by = '11111111-1111-4111-8111-000000000001', confirmed_at = now()
+   where rs.skill_id = v_sk and rs.resource_id <> (select resource_id from public.learning_activities where id = v_act);
+  perform t.logout();
+  perform t.login('11111111-1111-4111-8111-000000000009');
+  v_req := (public.request_different_activity(v_act, 'dddddddd-0000-4000-8000-000000000005')->>'request_id')::uuid;
+  perform t.logout();
+
+  perform t.login('11111111-1111-4111-8111-000000000001');
+  j := public.decline_activity_change_request(v_req, 'P9 sigue con este por ahora');
+  perform t.logout();
+
+  perform t.assert_eq((j->>'declined')::boolean, true, '69a. an adult may decline');
+  perform t.assert_eq((j->>'negative_record_created')::boolean, false,
+    '69b. declining creates no negative record, in the payload');
+  perform t.assert_eq((select status::text from public.learning_activities where id = v_act),
+    'selected', '69c. the activity is exactly as it was before anyone asked');
+  select skill_state::text into v_state from public.student_skills
+   where student_id = '44444444-4444-4444-8444-00000000000d' and skill_id = v_sk;
+  perform t.assert_eq(v_state, 'secure', '69d. and the skill profile did not move at all');
+end $$;
+rollback;
+
+-- 16. DIRECT STUDENT RESOURCE REPLACEMENT IS IMPOSSIBLE THROUGH EVERY PUBLIC
+-- RPC - the retired function is simply gone, the one remaining replacement
+-- path still requires a capability a child never holds, and asking for a
+-- resource confirmed for a different skill is still refused exactly as gate
+-- item b always meant.
+begin;
+do $$
+declare v_act uuid; v_other_sk uuid; v_other_resource uuid;
+begin
+  v_act := t.p9_ready('11111111-1111-4111-8111-000000000001');
   select id into v_other_sk from public.skills where code = 'NST.FR.2';
   perform t.logout();
-  update public.resource_skills rs
-     set confirmed = true, confirmed_by = '11111111-1111-4111-8111-000000000001',
-         confirmed_at = now()
+  update public.resource_skills rs set confirmed = true,
+         confirmed_by = '11111111-1111-4111-8111-000000000001', confirmed_at = now()
    where rs.skill_id = v_other_sk;
   select resource_id into v_other_resource from public.resource_skills
    where skill_id = v_other_sk and confirmed limit 1;
 
   perform t.login('11111111-1111-4111-8111-000000000009');
-  j := public.child_choose_alternative_activity(v_act, v_other_resource);
-  perform t.logout();
 
-  perform t.assert_eq((j->>'chosen')::boolean, false,
-    '58a. a resource confirmed for a DIFFERENT skill is refused');
-  perform t.assert_eq(j->>'reason', 'not_one_of_the_confirmed_options_for_this_skill',
-    '58b. with a reason a screen can render');
+  -- The retired function does not exist under any signature.
+  begin
+    perform public.child_choose_alternative_activity(v_act, 'dddddddd-0000-4000-8000-000000000005');
+    perform t.assert(false, '70a. the retired direct-replacement function still exists');
+  exception when others then
+    perform t.assert(true, '70a. child_choose_alternative_activity no longer exists at all');
+  end;
+
+  -- The one real replacement mechanism still requires learning_plan:update,
+  -- which a child never holds.
+  begin
+    perform public.replace_activity_resource(v_act, 'dddddddd-0000-4000-8000-000000000005');
+    perform t.assert(false, '70b. a child replaced her own activity through replace_activity_resource');
+  exception when others then
+    perform t.assert(true, '70b. and may not - that still requires learning_plan:update');
+  end;
+
+  -- Asking for a resource confirmed for a DIFFERENT skill is refused, not
+  -- silently widened.
+  perform t.assert_eq(
+    (public.request_different_activity(v_act, v_other_resource)->>'reason'),
+    'not_one_of_the_confirmed_options_for_this_skill',
+    '70c. a resource confirmed for a different skill is still refused when only asking too');
   perform t.assert_eq((select status::text from public.learning_activities where id = v_act),
-    'selected', '58c. and nothing about her original activity changed');
+    'selected', '70d. and nothing about her original activity changed');
+
+  perform t.logout();
 end $$;
 rollback;
 
+-- =============================================================================
+-- 71-86. STEP 8 PHASE 2 CORRECTION - four outcomes, two separate wishes
+-- =============================================================================
+-- completed / partially_completed / explored / stopped describe what
+-- happened. wants_more and revisit_later describe what somebody wants next,
+-- independently of what happened, and neither may move anything about the
+-- child.
+
+-- 17-20. All four outcomes are valid and round-trip.
 begin;
 do $$
-declare v_act uuid; j jsonb;
+declare v_act uuid; v_sess uuid; j jsonb;
 begin
   v_act := t.p9_ready('11111111-1111-4111-8111-000000000001');
   perform t.login('11111111-1111-4111-8111-000000000009');
-  begin
-    perform public.child_choose_alternative_activity(v_act, null, 'P9 quiero inventar la mía');
-    perform t.assert(false, '59a. a null resource invented a custom activity through the back door');
-  exception when others then
-    perform t.assert(true,
-      '59a. choosing something different still needs a resource - inventing one stays create_custom_activity, a parent''s action');
-  end;
+  v_sess := (public.start_learning_session(v_act)->>'session_id')::uuid;
+  j := public.end_learning_session(v_sess, 'completed');
+  perform t.assert_eq(j->>'outcome', 'completed', '71a. completed is valid');
   perform t.logout();
 end $$;
 rollback;
 
 begin;
 do $$
-declare v_act uuid; j jsonb; v_n int;
+declare v_act uuid; v_sess uuid; j jsonb;
 begin
-  -- Diego's family has nothing to do with Lucas.
   v_act := t.p9_ready('11111111-1111-4111-8111-000000000001');
-  perform t.login('11111111-1111-4111-8111-000000000003');
-  begin
-    perform public.child_choose_alternative_activity(v_act, 'dddddddd-0000-4000-8000-000000000005');
-    perform t.assert(false, '60a. another family reached into this child''s activity');
-  exception when others then
-    perform t.assert(true, '60a. and another family cannot use this at all');
-  end;
+  perform t.login('11111111-1111-4111-8111-000000000009');
+  v_sess := (public.start_learning_session(v_act)->>'session_id')::uuid;
+  j := public.end_learning_session(v_sess, 'partially_completed');
+  perform t.assert_eq(j->>'outcome', 'partially_completed', '72a. partially_completed is valid');
   perform t.logout();
 end $$;
 rollback;
 
+begin;
+do $$
+declare v_act uuid; v_sess uuid; j jsonb;
+begin
+  v_act := t.p9_ready('11111111-1111-4111-8111-000000000001');
+  perform t.login('11111111-1111-4111-8111-000000000009');
+  v_sess := (public.start_learning_session(v_act)->>'session_id')::uuid;
+  j := public.end_learning_session(v_sess, 'explored');
+  perform t.assert_eq(j->>'outcome', 'explored', '73a. explored is valid');
+  perform t.logout();
+end $$;
+rollback;
+
+begin;
+do $$
+declare v_act uuid; v_sess uuid; j jsonb;
+begin
+  v_act := t.p9_ready('11111111-1111-4111-8111-000000000001');
+  perform t.login('11111111-1111-4111-8111-000000000009');
+  v_sess := (public.start_learning_session(v_act)->>'session_id')::uuid;
+  j := public.end_learning_session(v_sess, 'stopped');
+  perform t.assert_eq(j->>'outcome', 'stopped', '74a. stopped is valid');
+  perform t.logout();
+end $$;
+rollback;
+
+-- 21, 22. Neither retired label is an outcome any more - the type itself
+-- refuses them, at the SQL level, before any function body even runs.
+begin;
+do $$
+begin
+  begin
+    perform 'child_wants_more'::app.learning_session_outcome;
+    perform t.assert(false, '75a. child_wants_more is still castable as a session outcome');
+  exception when others then
+    perform t.assert(true, '75a. wants_more is not a session outcome - the label does not exist');
+  end;
+end $$;
+rollback;
+
+begin;
+do $$
+begin
+  begin
+    perform 'revisit_later'::app.learning_session_outcome;
+    perform t.assert(false, '76a. revisit_later is still castable as a session outcome');
+  exception when others then
+    perform t.assert(true, '76a. revisit_later is not a session outcome - the label does not exist');
+  end;
+end $$;
+rollback;
+
+-- 23-26. The combinations the spec named explicitly, each keeping both
+-- truths at once.
+begin;
+do $$
+declare v_act uuid; v_sess uuid; j jsonb;
+begin
+  v_act := t.p9_ready('11111111-1111-4111-8111-000000000001');
+  perform t.login('11111111-1111-4111-8111-000000000009');
+  v_sess := (public.start_learning_session(v_act)->>'session_id')::uuid;
+  j := public.end_learning_session(v_sess, 'completed', null, null, null, true, false);
+  perform t.assert_eq(j->>'outcome', 'completed', '77a. completed + wants_more: the outcome is completed');
+  perform t.assert_eq((j->>'wants_more')::boolean, true, '77b. and wants_more is kept, separately');
+  perform t.assert_eq((j->>'revisit_later')::boolean, false, '77c. revisit_later stays false, not inferred');
+  perform t.logout();
+end $$;
+rollback;
+
+begin;
+do $$
+declare v_act uuid; v_sess uuid; j jsonb;
+begin
+  v_act := t.p9_ready('11111111-1111-4111-8111-000000000001');
+  perform t.login('11111111-1111-4111-8111-000000000009');
+  v_sess := (public.start_learning_session(v_act)->>'session_id')::uuid;
+  j := public.end_learning_session(v_sess, 'completed', null, null, null, false, true);
+  perform t.assert_eq(j->>'outcome', 'completed', '78a. completed + revisit_later: the outcome is completed');
+  perform t.assert_eq((j->>'revisit_later')::boolean, true, '78b. and revisit_later is kept, separately');
+end $$;
+rollback;
+
+begin;
+do $$
+declare v_act uuid; v_sess uuid; j jsonb;
+begin
+  v_act := t.p9_ready('11111111-1111-4111-8111-000000000001');
+  perform t.login('11111111-1111-4111-8111-000000000009');
+  v_sess := (public.start_learning_session(v_act)->>'session_id')::uuid;
+  j := public.end_learning_session(v_sess, 'explored', null, null, null, true, false);
+  perform t.assert_eq(j->>'outcome', 'explored', '79a. explored + wants_more: the outcome is explored');
+  perform t.assert_eq((j->>'wants_more')::boolean, true, '79b. and wants_more is kept');
+end $$;
+rollback;
+
+begin;
+do $$
+declare v_act uuid; v_sess uuid; j jsonb;
+begin
+  v_act := t.p9_ready('11111111-1111-4111-8111-000000000001');
+  perform t.login('11111111-1111-4111-8111-000000000009');
+  v_sess := (public.start_learning_session(v_act)->>'session_id')::uuid;
+  j := public.end_learning_session(v_sess, 'partially_completed', null, null, null, false, true);
+  perform t.assert_eq(j->>'outcome', 'partially_completed',
+    '80a. partially_completed + revisit_later: the outcome is partially_completed');
+  perform t.assert_eq((j->>'revisit_later')::boolean, true, '80b. and revisit_later is kept');
+end $$;
+rollback;
+
+-- 27. The flags are optional - ending without them defaults both to false and
+-- raises nothing.
+begin;
+do $$
+declare v_act uuid; v_sess uuid; j jsonb;
+begin
+  v_act := t.p9_ready('11111111-1111-4111-8111-000000000001');
+  perform t.login('11111111-1111-4111-8111-000000000009');
+  v_sess := (public.start_learning_session(v_act)->>'session_id')::uuid;
+  j := public.end_learning_session(v_sess, 'completed');
+  perform t.assert_eq((j->>'wants_more')::boolean, false, '81a. wants_more defaults false when not given');
+  perform t.assert_eq((j->>'revisit_later')::boolean, false, '81b. revisit_later defaults false when not given');
+end $$;
+rollback;
+
+-- 28-31. Neither the outcome nor either flag creates evidence, changes skill
+-- state, or ever downgrades a skill already confirmed secure.
+begin;
+do $$
+declare v_act uuid; v_sess uuid; j jsonb; v_sk uuid; v_state text; v_n int;
+begin
+  v_act := t.p9_ready('11111111-1111-4111-8111-000000000001');
+  select skill_id into v_sk from public.learning_activities where id = v_act;
+  perform t.login('11111111-1111-4111-8111-000000000001');
+  perform public.set_skill_state_override('44444444-4444-4444-8444-00000000000d', v_sk,
+                                          'secure', 'P9 she has this');
+  perform t.logout();
+  perform t.login('11111111-1111-4111-8111-000000000009');
+  v_sess := (public.start_learning_session(v_act)->>'session_id')::uuid;
+  j := public.end_learning_session(v_sess, 'stopped', null, null, null, true, true);
+  perform t.logout();
+
+  perform t.assert_eq((j->>'evidence_created')::boolean, false, '82a. the outcome creates no evidence');
+  select count(*)::int into v_n from public.learning_evidence_proposals where activity_id = v_act;
+  perform t.assert_eq(v_n, 0, '83a. nor does either follow-up flag - no proposal exists to even answer');
+  perform t.assert_eq((j->>'skill_state_changed')::boolean, false,
+    '84a. the outcome and the flags together change no skill state');
+  select skill_state::text into v_state from public.student_skills
+   where student_id = '44444444-4444-4444-8444-00000000000d' and skill_id = v_sk;
+  perform t.assert_eq(v_state, 'secure',
+    '85a. a skill already confirmed secure stays secure through stopped + wants_more + revisit_later');
+end $$;
+rollback;
+
+-- 32. History remains reconstructable, with both flags visible and in order.
+begin;
+do $$
+declare v_act uuid; v_sess uuid; j jsonb;
+begin
+  v_act := t.p9_ready('11111111-1111-4111-8111-000000000001');
+  perform t.login('11111111-1111-4111-8111-000000000009');
+  v_sess := (public.start_learning_session(v_act)->>'session_id')::uuid;
+  perform public.end_learning_session(v_sess, 'explored', 12, null, null, true, true);
+  j := public.activity_history(v_act);
+  perform t.logout();
+
+  perform t.assert_eq((j->'sessions'->0->>'outcome'), 'explored',
+    '86a. the reconstructed history shows the outcome');
+  perform t.assert_eq((j->'sessions'->0->>'wants_more')::boolean, true,
+    '86b. shows wants_more');
+  perform t.assert_eq((j->'sessions'->0->>'revisit_later')::boolean, true,
+    '86c. and shows revisit_later - the whole truth about the occasion, at once');
+end $$;
+rollback;
+
 -- =============================================================================
--- G13. The restriction itself is proved alive by breaking it
+-- G13-G17. The corrected guarantees, proved alive by breaking them
 -- =============================================================================
 
+-- G13. child_choose_alternative_activity must not come back under any name.
 begin;
 do $$
 begin
@@ -1356,16 +1824,147 @@ begin
       p_activity uuid, p_resource uuid, p_note text default null)
     returns jsonb language plpgsql security invoker set search_path = '' as $body$
     begin
-      -- No restriction at all: any confirmed resource for any skill.
       return jsonb_build_object('chosen', true);
     end $body$;
   $x$;
   begin
     perform app.assert_schema_invariants();
-    perform t.assert(false, 'G13. the invariants accepted a child-choice function with no restriction');
+    perform t.assert(false, 'G13. the invariants accepted the retired direct-replacement function coming back');
+  exception when others then
+    perform t.assert(sqlerrm like '%retired%',
+      'G13. a redefinition of child_choose_alternative_activity is refused');
+  end;
+  execute 'drop function public.child_choose_alternative_activity(uuid, uuid, text)';
+end $$;
+rollback;
+
+-- G14. approve_activity_change_request must actually call
+-- replace_activity_resource, not reimplement replacement inline.
+begin;
+do $$
+declare v_saved text;
+begin
+  perform t.logout();
+  select prosrc into v_saved from pg_proc
+   where proname = 'approve_activity_change_request' and pronamespace = 'public'::regnamespace;
+  execute $x$
+    create or replace function public.approve_activity_change_request(p_request uuid, p_note text default null)
+    returns jsonb language plpgsql security invoker set search_path = '' as $body$
+    begin
+      -- Reimplemented inline, calling nothing that already existed for this.
+      return jsonb_build_object('approved', true);
+    end $body$;
+  $x$;
+  begin
+    perform app.assert_schema_invariants();
+    perform t.assert(false, 'G14. the invariants accepted approval that bypasses replace_activity_resource');
+  exception when others then
+    perform t.assert(sqlerrm like '%replace_activity_resource%',
+      'G14. approval that does not go through replace_activity_resource is refused');
+  end;
+  execute format($x$
+    create or replace function public.approve_activity_change_request(p_request uuid, p_note text default null)
+    returns jsonb language plpgsql security invoker set search_path = '' as $body$ %s $body$;
+  $x$, v_saved);
+end $$;
+rollback;
+
+-- G15. request_different_activity must keep requiring a confirmed candidate.
+begin;
+do $$
+declare v_saved text;
+begin
+  perform t.logout();
+  select prosrc into v_saved from pg_proc
+   where proname = 'request_different_activity' and pronamespace = 'public'::regnamespace;
+  execute $x$
+    create or replace function public.request_different_activity(
+      p_activity uuid, p_resource uuid, p_note text default null)
+    returns jsonb language plpgsql security invoker set search_path = '' as $body$
+    begin
+      -- No restriction at all.
+      return jsonb_build_object('requested', true);
+    end $body$;
+  $x$;
+  begin
+    perform app.assert_schema_invariants();
+    perform t.assert(false, 'G15. the invariants accepted a request function with no restriction');
   exception when others then
     perform t.assert(sqlerrm like '%confirmed candidates%',
-      'G13. removing the confirmed-candidates restriction is refused');
+      'G15. removing the confirmed-candidates restriction from the request itself is refused');
   end;
+  execute format($x$
+    create or replace function public.request_different_activity(
+      p_activity uuid, p_resource uuid, p_note text default null)
+    returns jsonb language plpgsql security invoker set search_path = '' as $body$ %s $body$;
+  $x$, v_saved);
+end $$;
+rollback;
+
+-- G16. neither child-facing function may write to learning_activities itself.
+begin;
+do $$
+declare v_saved text;
+begin
+  perform t.logout();
+  select prosrc into v_saved from pg_proc
+   where proname = 'withdraw_activity_change_request' and pronamespace = 'public'::regnamespace;
+  execute $x$
+    create or replace function public.withdraw_activity_change_request(
+      p_request uuid, p_note text default null)
+    returns jsonb language plpgsql security invoker set search_path = '' as $body$
+    begin
+      update public.learning_activities set status = 'replaced' where id = (select activity_id from public.learning_activity_change_requests where id = p_request);
+      return jsonb_build_object('withdrawn', true);
+    end $body$;
+  $x$;
+  begin
+    perform app.assert_schema_invariants();
+    perform t.assert(false, 'G16. the invariants accepted a child-facing function writing to learning_activities');
+  exception when others then
+    perform t.assert(sqlerrm like '%writes directly to learning_activities%',
+      'G16. a request function that writes to learning_activities itself is refused');
+  end;
+  execute format($x$
+    create or replace function public.withdraw_activity_change_request(
+      p_request uuid, p_note text default null)
+    returns jsonb language plpgsql security invoker set search_path = '' as $body$ %s $body$;
+  $x$, v_saved);
+end $$;
+rollback;
+
+-- G17. deciding a request must check `approve` by name, not merely `update`.
+begin;
+do $$
+declare v_saved text;
+begin
+  perform t.logout();
+  select prosrc into v_saved from pg_proc
+   where proname = 'decline_activity_change_request' and pronamespace = 'public'::regnamespace;
+  execute $x$
+    create or replace function public.decline_activity_change_request(p_request uuid, p_note text default null)
+    returns jsonb language plpgsql security invoker set search_path = '' as $body$
+    declare r public.learning_activity_change_requests;
+    begin
+      select * into r from public.learning_activity_change_requests x where x.id = p_request;
+      if not found or not app.can_student_action(r.student_id, 'learning_activity', 'update') then
+        raise exception 'not permitted' using errcode = 'insufficient_privilege';
+      end if;
+      update public.learning_activity_change_requests x set status = 'declined',
+             decided_by = auth.uid(), decided_at = now() where x.id = p_request;
+      return jsonb_build_object('declined', true);
+    end $body$;
+  $x$;
+  begin
+    perform app.assert_schema_invariants();
+    perform t.assert(false, 'G17. the invariants accepted a decision function gated on `update` instead of `approve`');
+  exception when others then
+    perform t.assert(sqlerrm like '%approve%',
+      'G17. a decision function no longer checking `approve` by name is refused');
+  end;
+  execute format($x$
+    create or replace function public.decline_activity_change_request(p_request uuid, p_note text default null)
+    returns jsonb language plpgsql security invoker set search_path = '' as $body$ %s $body$;
+  $x$, v_saved);
 end $$;
 rollback;

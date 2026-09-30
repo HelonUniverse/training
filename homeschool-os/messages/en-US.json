@@ -1244,8 +1244,10 @@
       "byChild": "Recorded by {name}",
       "nothingChanged": "None of this changed what Nestra says about your child."
     },
-    "chooseSomethingDifferentChild": "Try a different one for this",
+    "chooseSomethingDifferentChild": "Ask for something different",
     "chooseSomethingDifferentChildOptions": "Something else that already works for this",
-    "notAConfirmedOption": "That one isn't ready for this yet. Ask a grown-up if you think it should be."
+    "notAConfirmedOption": "That one isn't ready for this yet. Ask a grown-up if you think it should be.",
+    "changeRequestPending": "Asked. Waiting for a grown-up to say yes or no.",
+    "changeRequestWithdraw": "Never mind, keep what I had"
   }
 }

@@ -1244,8 +1244,10 @@
       "byChild": "Registrado por {name}",
       "nothingChanged": "Nada de esto cambió lo que Nestra dice sobre tu hija."
     },
-    "chooseSomethingDifferentChild": "Probar otro para esto",
+    "chooseSomethingDifferentChild": "Pedir algo diferente",
     "chooseSomethingDifferentChildOptions": "Otra cosa que ya funciona para esto",
-    "notAConfirmedOption": "Ese todavía no está listo para esto. Pregúntale a una persona adulta si crees que debería estarlo."
+    "notAConfirmedOption": "Ese todavía no está listo para esto. Pregúntale a una persona adulta si crees que debería estarlo.",
+    "changeRequestPending": "Preguntado. Esperando que una persona adulta diga que sí o que no.",
+    "changeRequestWithdraw": "Mejor no, seguir con lo que tenía"
   }
 }
